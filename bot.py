@@ -1,10 +1,15 @@
-import telebot
+        import telebot
 from datetime import datetime
 import calendar
+import math
 
 # Substitua pelo Token do seu bot
 TOKEN = '8820258308:AAHxPYzXUr81ohEZx8cfN7qmADhzL8OYnW8'
 bot = telebot.TeleBot(TOKEN)
+
+# Valores financeiros da sua planilha (agora ficam ocultos no relatório)
+VALOR_SERVICO = 13.64 # Corte ou Religação
+VALOR_REAVISO = 7.80
 
 # Banco de dados temporário na memória
 usuarios = {}
@@ -24,10 +29,9 @@ def inicializar_agente(user_id, nome):
     if user_id not in usuarios:
         usuarios[user_id] = {
             'nome': nome,
-            'total_mes': 0,
+            'totais': {'corte': 0, 'religacao': 0, 'reaviso': 0},
             'producao_diaria': {
-                'Segunda-feira': 0, 'Terça-feira': 0, 'Quarta-feira': 0,
-                'Quinta-feira': 0, 'Sexta-feira': 0, 'Sábado': 0, 'Domingo': 0
+                dia: {'corte': 0, 'religacao': 0, 'reaviso': 0} for dia in DIAS_SEMANA.values()
             },
             'historico': []
         }
@@ -39,52 +43,62 @@ def start(message):
     inicializar_agente(user_id, nome)
     
     texto = (
-        f"🏢 *SISTEMA DE GESTÃO DE PRODUTIVIDADE - EQUATORIAL*\n"
+        f"🏢 *SISTEMA DE GESTÃO DE PRODUTIVIDADE*\n"
         f"Bem-vindo, Agente Comercial {nome}.\n\n"
-        "Este sistema registra sua produção diária e monitora o atingimento de metas com transparência corporativa.\n\n"
-        "📌 *COMANDOS OPERACIONAIS:*\n"
-        "• `/lancar [quantidade]` - Ex: `/lancar 50`\n"
-        "• `/relatorio` - Exibe o painel de metas e tabela semanal\n"
+        "Este sistema registra sua produção, separando Cortes, Religações e Reavisos, e calcula as metas de forma inteligente.\n\n"
+        "📌 *COMANDOS RÁPIDOS:*\n"
+        "• `/corte [qnt]` - Ex: `/corte 10`\n"
+        "• `/rel [qnt]` - Ex: `/rel 5` (Religação)\n"
+        "• `/rea [qnt]` - Ex: `/rea 15` (Reaviso)\n\n"
+        "• `/relatorio` - Painel de metas e tabela semanal\n"
         "• `/resetar` - Inicia um novo ciclo de faturamento"
     )
     bot.reply_to(message, texto, parse_mode="Markdown")
 
-@bot.message_handler(commands=['lancar'])
-def lancar(message):
+@bot.message_handler(commands=['corte', 'rel', 'rea', 'religacao', 'reaviso'])
+def registrar_servico(message):
     user_id = message.from_user.id
     nome = message.from_user.first_name
     inicializar_agente(user_id, nome)
     
+    comando = message.text.split()[0].lower()
+    
+    if comando == '/corte':
+        tipo_id = 'corte'
+        tipo_nome = 'Corte'
+    elif comando in ['/rel', '/religacao']:
+        tipo_id = 'religacao'
+        tipo_nome = 'Religação'
+    elif comando in ['/rea', '/reaviso']:
+        tipo_id = 'reaviso'
+        tipo_nome = 'Reaviso'
+    else:
+        return
+
     try:
-        # Extrai a quantidade lançada
         quantidade = int(message.text.split()[1])
         
-        # Obtém dados do momento exato do lançamento
         agora = datetime.now()
         dia_nome = DIAS_SEMANA[agora.weekday()]
-        data_hora = agora.strftime("%d/%m/%Y às %H:%M")
+        data_hora = agora.strftime("%d/%m %H:%M")
         
-        # Registra os dados no perfil do Agente
-        usuarios[user_id]['producao_diaria'][dia_nome] += quantidade
-        usuarios[user_id]['total_mes'] += quantidade
+        usuarios[user_id]['producao_diaria'][dia_nome][tipo_id] += quantidade
+        usuarios[user_id]['totais'][tipo_id] += quantidade
         
-        # Salva log de auditoria mantendo os últimos 5 lançamentos
-        log_entry = f"[{data_hora}] {dia_nome}: +{quantidade} serv."
+        log_entry = f"[{data_hora}] {dia_nome[:3]}: +{quantidade} {tipo_nome}"
         usuarios[user_id]['historico'].append(log_entry)
         if len(usuarios[user_id]['historico']) > 5:
             usuarios[user_id]['historico'].pop(0)
             
         resposta = (
             f"✅ *REGISTRO CONFIRMADO*\n"
-            f"Agente: {nome}\n"
-            f"Lançado em: {dia_nome}\n"
-            f"Volume: {quantidade} serviços.\n\n"
-            f"Para visualizar o impacto nas suas metas, digite `/relatorio`."
+            f"Adicionado: {quantidade} {tipo_nome}(s)\n"
+            f"Veja seu avanço com `/relatorio`"
         )
         bot.reply_to(message, resposta, parse_mode="Markdown")
         
     except:
-        bot.reply_to(message, "⚠️ *FALHA NO REGISTRO*\nPadrão exigido: `/lancar [quantidade]`. Exemplo: `/lancar 55`", parse_mode="Markdown")
+        bot.reply_to(message, f"⚠️ *FALHA NO REGISTRO*\nUse o formato correto. Exemplo: `{comando} 5`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['relatorio', 'status'])
 def relatorio(message):
@@ -93,48 +107,54 @@ def relatorio(message):
     inicializar_agente(user_id, nome)
     
     dados = usuarios[user_id]
-    total = dados['total_mes']
+    t = dados['totais']
     dias = dados['producao_diaria']
     
-    # Metas Oficiais [Opção A]
+    # O cálculo financeiro continua rodando em segundo plano (oculto)
+    valor_total = (t['corte'] + t['religacao']) * VALOR_SERVICO + (t['reaviso'] * VALOR_REAVISO)
+    total_servicos_brutos = t['corte'] + t['religacao'] + t['reaviso']
+    
     m_f1, m_f2, m_f3 = 250, 300, 350
-    
-    # Cálculo de Dificuldade Diária
     dias_rest = obter_dias_restantes()
-    media_f1 = max(0, m_f1 - total) / dias_rest if total < m_f1 else 0
-    media_f2 = max(0, m_f2 - total) / dias_rest if total < m_f2 else 0
-    media_f3 = max(0, m_f3 - total) / dias_rest if total < m_f3 else 0
     
-    # Definição de Status
-    if total >= m_f3: status_msg = "🟢 FAIXA 3 CONCLUÍDA"
-    elif total >= m_f2: status_msg = "🟡 FAIXA 2 CONCLUÍDA"
-    elif total >= m_f1: status_msg = "🟠 FAIXA 1 CONCLUÍDA"
-    else: status_msg = "🔴 EM EXECUÇÃO (Abaixo da F1)"
+    def calcular_meta(meta_qnt):
+        meta_rs = meta_qnt * VALOR_SERVICO
+        falta_rs = meta_rs - valor_total
+        
+        if falta_rs <= 0:
+            return "✅ *CONCLUÍDA*"
+            
+        faltam_servicos = math.ceil(falta_rs / VALOR_SERVICO)
+        faltam_reavisos = math.ceil(falta_rs / VALOR_REAVISO)
+        media_dia = faltam_servicos / dias_rest
+        
+        return f"Faltam {faltam_servicos} serv. OU {faltam_reavisos} reavisos (Média: {media_dia:.1f}/dia)"
+
+    if valor_total >= (m_f3 * VALOR_SERVICO): status_msg = "🟢 FAIXA 3 CONCLUÍDA"
+    elif valor_total >= (m_f2 * VALOR_SERVICO): status_msg = "🟡 FAIXA 2 CONCLUÍDA"
+    elif valor_total >= (m_f1 * VALOR_SERVICO): status_msg = "🟠 FAIXA 1 CONCLUÍDA"
+    else: status_msg = "🔴 EM EXECUÇÃO"
     
-    # Montagem do Relatório Visual
-    tabela_semanal = (
-        f"Segunda-feira : {dias['Segunda-feira']}\n"
-        f"Terça-feira   : {dias['Terça-feira']}\n"
-        f"Quarta-feira  : {dias['Quarta-feira']}\n"
-        f"Quinta-feira  : {dias['Quinta-feira']}\n"
-        f"Sexta-feira   : {dias['Sexta-feira']}\n"
-        f"Sábado        : {dias['Sábado']}"
-    )
+    tabela_linhas = []
+    for dia in DIAS_SEMANA.values():
+        d = dias[dia]
+        tabela_linhas.append(f"{dia[:3]} ➔ C: {d['corte']} | R: {d['religacao']} | Rv: {d['reaviso']}")
+    tabela_semanal = "\n".join(tabela_linhas)
     
-    historico_texto = "\n".join(dados['historico']) if dados['historico'] else "Nenhum registro no ciclo atual."
+    historico_texto = "\n".join(dados['historico']) if dados['historico'] else "Nenhum registro recente."
     
     relatorio_final = (
         f"📊 *PAINEL DE PERFORMANCE CORPORATIVO*\n"
         f"👤 *Agente:* {nome} | *Status:* {status_msg}\n"
         f"═════════════════════════\n\n"
-        f"📈 *VOLUME ACUMULADO:* {total} serviços\n\n"
-        f"📅 *DISTRIBUIÇÃO DA SEMANA:*\n"
+        f"📋 *Total de Ordens:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
+        f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
         f"🎯 *PROJEÇÃO DE METAS (Restam {dias_rest} dias):*\n"
-        f"• *Faixa 1 ({m_f1}):* Faltam {max(0, m_f1 - total)} ➔ Média: {media_f1:.1f}/dia\n"
-        f"• *Faixa 2 ({m_f2}):* Faltam {max(0, m_f2 - total)} ➔ Média: {media_f2:.1f}/dia\n"
-        f"• *Faixa 3 ({m_f3}):* Faltam {max(0, m_f3 - total)} ➔ Média: {media_f3:.1f}/dia\n\n"
-        f"🔎 *ÚLTIMOS REGISTROS (Auditoria):*\n"
+        f"• *Faixa 1 ({m_f1}):* {calcular_meta(m_f1)}\n"
+        f"• *Faixa 2 ({m_f2}):* {calcular_meta(m_f2)}\n"
+        f"• *Faixa 3 ({m_f3}):* {calcular_meta(m_f3)}\n\n"
+        f"🔎 *ÚLTIMOS REGISTROS:*\n"
         f"`{historico_texto}`"
     )
     
@@ -146,13 +166,12 @@ def resetar(message):
     nome = message.from_user.first_name
     
     if user_id in usuarios:
-        usuarios[user_id]['total_mes'] = 0
+        usuarios[user_id]['totais'] = {'corte': 0, 'religacao': 0, 'reaviso': 0}
         for dia in DIAS_SEMANA.values():
-            usuarios[user_id]['producao_diaria'][dia] = 0
+            usuarios[user_id]['producao_diaria'][dia] = {'corte': 0, 'religacao': 0, 'reaviso': 0}
         usuarios[user_id]['historico'] = []
         
-        bot.reply_to(message, f"🔄 *CICLO REINICIADO*\nAgente {nome}, seus dados de faturamento foram zerados para o novo período.", parse_mode="Markdown")
+        bot.reply_to(message, f"🔄 *CICLO REINICIADO*\nAgente {nome}, seus dados foram zerados para o novo período.", parse_mode="Markdown")
 
 print("Sistema Corporativo Online. Aguardando comandos no Telegram...")
 bot.infinity_polling()
-
