@@ -58,6 +58,8 @@ def start(message):
         "• `/corte [qnt]` - Ex: `/corte 10`\n"
         "• `/rel [qnt]` - Ex: `/rel 5` (Religação)\n"
         "• `/rea [qnt]` - Ex: `/rea 15` (Reaviso)\n\n"
+        "🛠️ *CORREÇÕES:*\n"
+        "• `/retira [tipo] [qnt]` - Corrige um erro (Ex: `/retira rea 7`)\n\n"
         "📊 *CONSULTAS E SIMULAÇÕES:*\n"
         "• `/relatorio` - Painel de metas e tabela semanal\n"
         "• `/total [servicos] [reavisos]` - Simula sua meta (Ex: `/total 200 50`)\n"
@@ -110,7 +112,64 @@ def registrar_servico(message):
     except:
         bot.reply_to(message, f"⚠️ *FALHA NO REGISTRO*\nUse o formato correto. Exemplo: `{comando} 5`", parse_mode="Markdown")
 
-# NOVO COMANDO: SIMULAÇÃO
+# NOVO COMANDO: RETIRAR (CORREÇÃO DE ERRO)
+@bot.message_handler(commands=['retira', 'remover'])
+def retirar_servico(message):
+    user_id = message.from_user.id
+    nome = message.from_user.first_name
+    inicializar_agente(user_id, nome)
+
+    try:
+        partes = message.text.split()
+        if len(partes) != 3:
+            bot.reply_to(message, "⚠️ *FORMATO INCORRETO*\nPara retirar, use: `/retira [tipo] [qnt]`\nTipos permitidos: `corte`, `rel` ou `rea`\nExemplo: `/retira rea 7`", parse_mode="Markdown")
+            return
+
+        tipo_input = partes[1].lower()
+        quantidade = int(partes[2])
+
+        if tipo_input in ['corte']:
+            tipo_id = 'corte'
+            tipo_nome = 'Corte'
+        elif tipo_input in ['rel', 'religacao']:
+            tipo_id = 'religacao'
+            tipo_nome = 'Religação'
+        elif tipo_input in ['rea', 'reaviso']:
+            tipo_id = 'reaviso'
+            tipo_nome = 'Reaviso'
+        else:
+            bot.reply_to(message, "⚠️ Tipo desconhecido. Use `corte`, `rel` ou `rea`.", parse_mode="Markdown")
+            return
+
+        agora = datetime.now()
+        dia_nome = DIAS_SEMANA[agora.weekday()]
+        data_hora = agora.strftime("%d/%m %H:%M")
+
+        qnt_atual_dia = usuarios[user_id]['producao_diaria'][dia_nome][tipo_id]
+        qnt_atual_total = usuarios[user_id]['totais'][tipo_id]
+
+        if quantidade > qnt_atual_total:
+            quantidade = qnt_atual_total # Evita ficar com número negativo
+
+        usuarios[user_id]['producao_diaria'][dia_nome][tipo_id] = max(0, qnt_atual_dia - quantidade)
+        usuarios[user_id]['totais'][tipo_id] = max(0, qnt_atual_total - quantidade)
+
+        log_entry = f"[{data_hora}] {dia_nome[:3]}: -{quantidade} {tipo_nome} (Correção)"
+        usuarios[user_id]['historico'].append(log_entry)
+        if len(usuarios[user_id]['historico']) > 5:
+            usuarios[user_id]['historico'].pop(0)
+
+        resposta = (
+            f"🗑️ *CORREÇÃO FEITA*\n"
+            f"Removido: {quantidade} {tipo_nome}(s)\n"
+            f"Tudo ajustado! Confira seu novo saldo com `/relatorio`"
+        )
+        bot.reply_to(message, resposta, parse_mode="Markdown")
+
+    except ValueError:
+        bot.reply_to(message, "⚠️ Erro! Digite a quantidade em números. Exemplo: `/retira rea 7`", parse_mode="Markdown")
+
+# COMANDO: SIMULAÇÃO
 @bot.message_handler(commands=['total', 'simular'])
 def simular_meta(message):
     try:
@@ -176,16 +235,16 @@ def relatorio(message):
         falta_pontos = meta_pontos - pontos_total
         
         if falta_pontos <= 0:
-            return "✅ *BATI A META*"
+            return "✅ *CONCLUÍDA*"
             
         faltam_servicos = math.ceil(falta_pontos / PESO_SERVICO)
         faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
         
         return f"Faltam {faltam_servicos} serv. OU {faltam_reavisos} reavisos"
 
-    if pontos_total >= (m_f3 * PESO_SERVICO): status_msg = "🥉 FAIXA 3 CONCLUÍDA"
-    elif pontos_total >= (m_f2 * PESO_SERVICO): status_msg = "🥈 FAIXA 2 CONCLUÍDA"
-    elif pontos_total >= (m_f1 * PESO_SERVICO): status_msg = "🥇 FAIXA 1 CONCLUÍDA"
+    if pontos_total >= (m_f3 * PESO_SERVICO): status_msg = "🟢 FAIXA 3 CONCLUÍDA"
+    elif pontos_total >= (m_f2 * PESO_SERVICO): status_msg = "🟡 FAIXA 2 CONCLUÍDA"
+    elif pontos_total >= (m_f1 * PESO_SERVICO): status_msg = "🟠 FAIXA 1 CONCLUÍDA"
     else: status_msg = "🔴 NA BATALHA"
     
     tabela_linhas = []
@@ -197,13 +256,13 @@ def relatorio(message):
     historico_texto = "\n".join(dados['historico']) if dados['historico'] else "Nenhum registro recente."
     
     relatorio_final = (
-        f"📊 *DIÁRIO  DA MINHA PRODUÇÃO*\n"
+        f"📊 *DIÁRIO DE PRODUÇÃO*\n"
         f"👤 *Técnico:* {nome} | *Status:* {status_msg}\n"
         f"═════════════════════════\n\n"
-        f"📋 *Total :* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
+        f"📋 *Total na Rua:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
         f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
-        f"🎯 *MINHA PROJEÇÃO PARA CHEHAR NO OBJETIVO:*\n"
+        f"🎯 *PROJEÇÃO DE METAS:*\n"
         f"• *Faixa 1 ({m_f1}):* {calcular_meta(m_f1)}\n"
         f"• *Faixa 2 ({m_f2}):* {calcular_meta(m_f2)}\n"
         f"• *Faixa 3 ({m_f3}):* {calcular_meta(m_f3)}\n\n"
