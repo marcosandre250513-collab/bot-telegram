@@ -1,30 +1,13 @@
-import telebot
+    import telebot
 from datetime import datetime
 import calendar
 import math
-from flask import Flask
-from threading import Thread
-
-# --- CONFIGURAÇÃO DO SERVIDOR (Evita o erro CRASHED no Railway) ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Servidor do App do Técnico está online!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-# Inicia o servidor em segundo plano
-t = Thread(target=run)
-t.start()
-# ------------------------------------------------------------------
 
 # Substitua pelo Token do seu bot
 TOKEN = '8820258308:AAHxPYzXUr81ohEZx8cfN7qmADhzL8OYnW8'
 bot = telebot.TeleBot(TOKEN)
 
-# Valores financeiros da sua planilha (agora ficam ocultos no relatório)
+# Valores financeiros da sua planilha
 VALOR_SERVICO = 13.64 # Corte ou Religação
 VALOR_REAVISO = 7.80
 
@@ -60,9 +43,9 @@ def start(message):
     inicializar_agente(user_id, nome)
     
     texto = (
-        f"🏢 *CONTROLE DE CAMPO*\n"
-        f"Fala, {nome}! Bem-vindo ao seu registro operacional.\n\n"
-        "Este sistema registra sua produção, separando Cortes, Religações e Reavisos, e calcula as metas de forma rápida.\n\n"
+        f"🏢 *SISTEMA DE GESTÃO DE PRODUTIVIDADE*\n"
+        f"Bem-vindo, Agente Comercial {nome}.\n\n"
+        "Este sistema registra sua produção, separando Cortes, Religações e Reavisos, e calcula as metas com base no valor de cada serviço.\n\n"
         "📌 *COMANDOS RÁPIDOS:*\n"
         "• `/corte [qnt]` - Ex: `/corte 10`\n"
         "• `/rel [qnt]` - Ex: `/rel 5` (Religação)\n"
@@ -80,6 +63,7 @@ def registrar_servico(message):
     
     comando = message.text.split()[0].lower()
     
+    # Identifica o tipo de serviço pelo comando digitado
     if comando == '/corte':
         tipo_id = 'corte'
         tipo_nome = 'Corte'
@@ -99,9 +83,11 @@ def registrar_servico(message):
         dia_nome = DIAS_SEMANA[agora.weekday()]
         data_hora = agora.strftime("%d/%m %H:%M")
         
+        # Atualiza o banco de dados
         usuarios[user_id]['producao_diaria'][dia_nome][tipo_id] += quantidade
         usuarios[user_id]['totais'][tipo_id] += quantidade
         
+        # Salva histórico
         log_entry = f"[{data_hora}] {dia_nome[:3]}: +{quantidade} {tipo_nome}"
         usuarios[user_id]['historico'].append(log_entry)
         if len(usuarios[user_id]['historico']) > 5:
@@ -127,14 +113,16 @@ def relatorio(message):
     t = dados['totais']
     dias = dados['producao_diaria']
     
+    # Cálculo Financeiro
     valor_total = (t['corte'] + t['religacao']) * VALOR_SERVICO + (t['reaviso'] * VALOR_REAVISO)
     total_servicos_brutos = t['corte'] + t['religacao'] + t['reaviso']
     
+    # Metas Oficiais de Volume Equivalente
     m_f1, m_f2, m_f3 = 250, 300, 350
     dias_rest = obter_dias_restantes()
     
     def calcular_meta(meta_qnt):
-        meta_rs = meta_qnt * VALOR_SERVICO
+        meta_rs = meta_qnt * VALOR_SERVICO # Transforma a meta em valor Financeiro (Ex: 250 * 13.64)
         falta_rs = meta_rs - valor_total
         
         if falta_rs <= 0:
@@ -146,11 +134,13 @@ def relatorio(message):
         
         return f"Faltam {faltam_servicos} serv. OU {faltam_reavisos} reavisos (Média: {media_dia:.1f}/dia)"
 
+    # Definição de Status baseado no Financeiro
     if valor_total >= (m_f3 * VALOR_SERVICO): status_msg = "🟢 FAIXA 3 CONCLUÍDA"
     elif valor_total >= (m_f2 * VALOR_SERVICO): status_msg = "🟡 FAIXA 2 CONCLUÍDA"
     elif valor_total >= (m_f1 * VALOR_SERVICO): status_msg = "🟠 FAIXA 1 CONCLUÍDA"
-    else: status_msg = "🔴 NA BATALHA"
+    else: status_msg = "🔴 EM EXECUÇÃO"
     
+    # Montagem da Tabela Semanal (C = Corte, R = Religação, Rv = Reaviso)
     tabela_linhas = []
     for dia in DIAS_SEMANA.values():
         d = dias[dia]
@@ -160,10 +150,11 @@ def relatorio(message):
     historico_texto = "\n".join(dados['historico']) if dados['historico'] else "Nenhum registro recente."
     
     relatorio_final = (
-        f"📊 *DIÁRIO DE PRODUÇÃO*\n"
-        f"👤 *Técnico:* {nome} | *Status:* {status_msg}\n"
+        f"📊 *PAINEL DE PERFORMANCE CORPORATIVO*\n"
+        f"👤 *Agente:* {nome} | *Status:* {status_msg}\n"
         f"═════════════════════════\n\n"
-        f"📋 *Total na Rua:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
+        f"💰 *VALOR ACUMULADO:* R$ {valor_total:.2f}\n"
+        f"📋 *Total de Ordens:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
         f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
         f"🎯 *PROJEÇÃO DE METAS (Restam {dias_rest} dias):*\n"
@@ -187,7 +178,7 @@ def resetar(message):
             usuarios[user_id]['producao_diaria'][dia] = {'corte': 0, 'religacao': 0, 'reaviso': 0}
         usuarios[user_id]['historico'] = []
         
-        bot.reply_to(message, f"🔄 *CICLO REINICIADO*\n{nome}, tudo zerado para começar a nova contagem.", parse_mode="Markdown")
+        bot.reply_to(message, f"🔄 *CICLO REINICIADO*\nAgente {nome}, seus dados de faturamento foram zerados para o novo período.", parse_mode="Markdown")
 
-print("Sistema Online. Aguardando comandos no Telegram...")
+print("Sistema Corporativo Online. Aguardando comandos no Telegram...")
 bot.infinity_polling()
