@@ -30,7 +30,7 @@ PESO_REAVISO = 7.80
 usuarios = {}
 
 DIAS_SEMANA = {
-    0: 'SEXTA', 1: 'TERCA', 2: 'QUARTA',
+    0: 'SEG', 1: 'TERCA', 2: 'QUARTA',
     3: 'QUINTA', 4: 'SEXTA', 5: 'SAB', 6: 'FOLGA'
 }
 
@@ -203,7 +203,7 @@ def relatorio(message):
         f"📋 *Total :* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
         f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
-        f"🎯 *MINHA PROJEÇÃO PARA CHEGAR NA META:*\n"
+        f"🎯 *MINHA PROJEÇÃO PARA CHEHAR NO OBJETIVO:*\n"
         f"• *Faixa 1 ({m_f1}):* {calcular_meta(m_f1)}\n"
         f"• *Faixa 2 ({m_f2}):* {calcular_meta(m_f2)}\n"
         f"• *Faixa 3 ({m_f3}):* {calcular_meta(m_f3)}\n\n"
