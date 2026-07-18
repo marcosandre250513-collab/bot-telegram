@@ -53,17 +53,17 @@ def start(message):
     
     texto = (
         f"🏢 *MEU CONTROLE DE PRODUÇÃO*\n"
-        f"Fala, {nome}! .\n\n"
+        f"Olá, {nome}! .\n\n"
         "📌 *COMANDOS DE REGISTRO:*\n"
         "• `/corte ` - Ex: `/corte 10`\n"
         "• `/rel ` - Ex: `/rel 5` (Religação)\n"
         "• `/rea ` - Ex: `/rea 15` (Reaviso)\n\n"
         "🛠️ *CORREÇÕES:*\n"
         "• `/retira [tipo] [qnt]` - Corrige um erro (Ex: `/retira rea 7`)\n\n"
-        "📊 *CONSULTAS E SIMULAÇÕES:*\n"
-        "• `/relatorio` - Painel de metas e tabela semanal\n"
-        "• `/total [servicos] [reavisos]` - Simula sua meta (Ex: `/total 200 50`)\n"
-        "• `/resetar` - Inicia um novo ciclo"
+        "📊 *CONSULTA PRODUÇÃO, SIMULAR TOTAL OU ZERAR PLANILHA:*\n"
+        "• `/relatorio` - vai abrir uma tabela da minha produção atual\n"
+        "• `/total [servicos] [reavisos]` - simula minha produção total(Ex: `/total 200 50`)\n"
+        "• `/resetar` - zera toda planilha, pronta pra nova semana"
     )
     bot.reply_to(message, texto, parse_mode="Markdown")
 
@@ -103,9 +103,9 @@ def registrar_servico(message):
             usuarios[user_id]['historico'].pop(0)
             
         resposta = (
-            f"✅ *REGISTRO CONFIRMADO*\n"
+            f"✅ *ADIÇÃO CONCLUÍDA*\n"
             f"Adicionado: {quantidade} {tipo_nome}(s)\n"
-            f"Veja seu avanço com `/relatorio`"
+            f"se eu quiser ver minha produção atual`/relatorio`"
         )
         bot.reply_to(message, resposta, parse_mode="Markdown")
         
@@ -123,7 +123,7 @@ def retirar_servico(message):
         partes = message.text.split()
         if len(partes) != 3:
             bot.reply_to(message, "⚠️ *FORMATO INCORRETO*\nPara retirar, use: `/retira [tipo] [qnt]`\nTipos permitidos: `corte`, `rel` ou `rea`\nExemplo: `/retira rea 7`", parse_mode="Markdown")
-            return
+            returno do estadual 
 
         tipo_input = partes[1].lower()
         quantidade = int(partes[2])
@@ -162,7 +162,7 @@ def retirar_servico(message):
         resposta = (
             f"🗑️ *CORREÇÃO FEITA*\n"
             f"Removido: {quantidade} {tipo_nome}(s)\n"
-            f"Tudo ajustado! Confira seu novo saldo com `/relatorio`"
+            f"Tudo ajustado! Confirir meu novo saldo`/relatorio`"
         )
         bot.reply_to(message, resposta, parse_mode="Markdown")
 
@@ -195,15 +195,15 @@ def simular_meta(message):
             faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
             return f"Faltam {faltam_servicos} serv. OU {faltam_reavisos} reavisos"
 
-        if pontos_simulados >= (m_f3 * PESO_SERVICO): status_msg = "🟢 FAIXA 3"
-        elif pontos_simulados >= (m_f2 * PESO_SERVICO): status_msg = "🟡 FAIXA 2"
-        elif pontos_simulados >= (m_f1 * PESO_SERVICO): status_msg = "🟠 FAIXA 1"
+        if pontos_simulados >= (m_f3 * PESO_SERVICO): status_msg = "🟢  CHEGUEI NA FAIXA 3"
+        elif pontos_simulados >= (m_f2 * PESO_SERVICO): status_msg = "🟡 CHEGUEI NA FAIXA 2"
+        elif pontos_simulados >= (m_f1 * PESO_SERVICO): status_msg = "🟠 CHEGUEI NA FAIXA 1"
         else: status_msg = "🔴 NÃO BATI A META AINDA 😢"
         
         resposta = (
             f"🔮 *MEU RESULTADO*\n"
-            f"Serviços (C/R): {sim_servicos} | Reavisos: {sim_reavisos}\n"
-            f"Status Simulado: {status_msg}\n"
+            f"Serviços (CORTE/REL): {sim_servicos} | Reavisos: {sim_reavisos}\n"
+            f"STATUS DA: {status_msg}\n"
             f"═════════════════════════\n\n"
             f"🎯 *MINHA VISÃO DA META:*\n"
             f"• *FAIXA 1 💲(250):* {calcular_meta_simulada(m_f1)}\n"
@@ -235,7 +235,7 @@ def relatorio(message):
         falta_pontos = meta_pontos - pontos_total
         
         if falta_pontos <= 0:
-            return "✅ *CONCLUÍDA*"
+            return "✅ *BATIDA*"
             
         faltam_servicos = math.ceil(falta_pontos / PESO_SERVICO)
         faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
