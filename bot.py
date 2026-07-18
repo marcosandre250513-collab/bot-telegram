@@ -256,10 +256,10 @@ def relatorio(message):
     historico_texto = "\n".join(dados['historico']) if dados['historico'] else "Nenhum registro recente."
     
     relatorio_final = (
-        f"📊 *DIÁRIO DE PRODUÇÃO*\n"
-        f"👤 *Técnico:* {nome} | *Status:* {status_msg}\n"
+        f"📊 *DIÁRIO DA MINHA PRODUÇÃO*\n"
+        f"👤 *AGENTE:* {nome} | *Status:* {status_msg}\n"
         f"═════════════════════════\n\n"
-        f"📋 *Total na Rua:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
+        f"📋 *TOTAL:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
         f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
         f"🎯 *PROJEÇÃO DE METAS:*\n"
@@ -283,7 +283,7 @@ def resetar(message):
             usuarios[user_id]['producao_diaria'][dia] = {'corte': 0, 'religacao': 0, 'reaviso': 0}
         usuarios[user_id]['historico'] = []
         
-        bot.reply_to(message, f"🔄 *CICLO REINICIADO*\n{nome}, tudo zerado para começar a nova contagem.", parse_mode="Markdown")
+        bot.reply_to(message, f"🔄 *RELATORIO ZERADO*\n{nome}, tudo zerado para começar a nova contagem.", parse_mode="Markdown")
 
 print("Sistema Online. Aguardando comandos no Telegram...")
 bot.infinity_polling()
