@@ -30,8 +30,8 @@ PESO_REAVISO = 7.80
 usuarios = {}
 
 DIAS_SEMANA = {
-    0: 'Segunda-feira', 1: 'Terça-feira', 2: 'Quarta-feira',
-    3: 'Quinta-feira', 4: 'Sexta-feira', 5: 'Sábado', 6: 'Domingo'
+    0: 'SEXTA', 1: 'TERCA', 2: 'QUARTA',
+    3: 'QUINTA', 4: 'SEXTA', 5: 'SAB', 6: 'FOLGA'
 }
 
 def inicializar_agente(user_id, nome):
@@ -52,8 +52,8 @@ def start(message):
     inicializar_agente(user_id, nome)
     
     texto = (
-        f"🏢 *CONTROLE DE CAMPO*\n"
-        f"Fala, {nome}! Bem-vindo ao seu registro operacional.\n\n"
+        f"🏢 *MEU CONTROLE DE PRODUÇÃO*\n"
+        f"Fala, {nome}! .\n\n"
         "📌 *COMANDOS DE REGISTRO:*\n"
         "• `/corte [qnt]` - Ex: `/corte 10`\n"
         "• `/rel [qnt]` - Ex: `/rel 5` (Religação)\n"
@@ -130,7 +130,7 @@ def simular_meta(message):
             falta_pontos = meta_pontos - pontos_simulados
             
             if falta_pontos <= 0:
-                return "✅ *ALCANÇADA*"
+                return "✅ *META BATIDA 📈*"
                 
             faltam_servicos = math.ceil(falta_pontos / PESO_SERVICO)
             faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
@@ -139,19 +139,18 @@ def simular_meta(message):
         if pontos_simulados >= (m_f3 * PESO_SERVICO): status_msg = "🟢 FAIXA 3"
         elif pontos_simulados >= (m_f2 * PESO_SERVICO): status_msg = "🟡 FAIXA 2"
         elif pontos_simulados >= (m_f1 * PESO_SERVICO): status_msg = "🟠 FAIXA 1"
-        else: status_msg = "🔴 ABAIXO DA META"
+        else: status_msg = "🔴 NÃO BATI A META AINDA 😢"
         
         resposta = (
-            f"🔮 *SIMULAÇÃO DE RESULTADO*\n"
+            f"🔮 *MEU RESULTADO*\n"
             f"Serviços (C/R): {sim_servicos} | Reavisos: {sim_reavisos}\n"
             f"Status Simulado: {status_msg}\n"
             f"═════════════════════════\n\n"
-            f"🎯 *PROJEÇÃO DA SIMULAÇÃO:*\n"
-            f"• *Faixa 1 (250):* {calcular_meta_simulada(m_f1)}\n"
-            f"• *Faixa 2 (300):* {calcular_meta_simulada(m_f2)}\n"
-            f"• *Faixa 3 (350):* {calcular_meta_simulada(m_f3)}\n\n"
-            f"_(Essa simulação não altera seus registros reais no /relatorio)_"
-        )
+            f"🎯 *MINHA VISÃO DA META:*\n"
+            f"• *FAIXA 1 💲(250):* {calcular_meta_simulada(m_f1)}\n"
+            f"• *FAIXA 2 💲(300):* {calcular_meta_simulada(m_f2)}\n"
+            f"• *FAIXA 3 💲(350):* {calcular_meta_simulada(m_f3)}\n\n"
+            f"_(Simulação total da meta, não altera a planilha/relatorio)_")
         bot.reply_to(message, resposta, parse_mode="Markdown")
         
     except ValueError:
