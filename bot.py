@@ -44,8 +44,8 @@ def start(message):
     
     texto = (
         f"🏢 *MEU SISTEMA DE GESTÃO DE PRODUTIVIDADE*\n"
-        f"Bem-vindo, Agente Comercial {nome}.\n\n"
-        "Este sistema registra sua produção, separando Cortes, Religações e Reavisos, e calcula as metas com base no valor de cada serviço.\n\n"
+        f"Olá, Agente Comercial {nome}.\n\n"
+        "Este bot é apenas para controlar minha bonificação!!! 📈 💹 📈.\n\n"
         "📌 *COMANDOS RÁPIDOS:*\n"
         "• `/corte [qnt]` - Ex: `/corte 10`\n"
         "• `/rel [qnt]` - Ex: `/rel 5` (Religação)\n"
