@@ -43,7 +43,7 @@ def start(message):
     inicializar_agente(user_id, nome)
     
     texto = (
-        f"🏢 *SISTEMA DE GESTÃO DE PRODUTIVIDADE*\n"
+        f"🏢 *MEU SISTEMA DE GESTÃO DE PRODUTIVIDADE*\n"
         f"Bem-vindo, Agente Comercial {nome}.\n\n"
         "Este sistema registra sua produção, separando Cortes, Religações e Reavisos, e calcula as metas com base no valor de cada serviço.\n\n"
         "📌 *COMANDOS RÁPIDOS:*\n"
@@ -126,7 +126,7 @@ def relatorio(message):
         falta_rs = meta_rs - valor_total
         
         if falta_rs <= 0:
-            return "✅ *CONCLUÍDA*"
+            return "✅ *BATI A META*"
             
         faltam_servicos = math.ceil(falta_rs / VALOR_SERVICO)
         faltam_reavisos = math.ceil(falta_rs / VALOR_REAVISO)
@@ -138,7 +138,7 @@ def relatorio(message):
     if valor_total >= (m_f3 * VALOR_SERVICO): status_msg = "🟢 FAIXA 3 CONCLUÍDA"
     elif valor_total >= (m_f2 * VALOR_SERVICO): status_msg = "🟡 FAIXA 2 CONCLUÍDA"
     elif valor_total >= (m_f1 * VALOR_SERVICO): status_msg = "🟠 FAIXA 1 CONCLUÍDA"
-    else: status_msg = "🔴 EM EXECUÇÃO"
+    else: status_msg = "🔴 BUSCANDO A META"
     
     # Montagem da Tabela Semanal (C = Corte, R = Religação, Rv = Reaviso)
     tabela_linhas = []
@@ -150,14 +150,14 @@ def relatorio(message):
     historico_texto = "\n".join(dados['historico']) if dados['historico'] else "Nenhum registro recente."
     
     relatorio_final = (
-        f"📊 *PAINEL DE PERFORMANCE CORPORATIVO*\n"
+        f"📊 *MEU SISTEMA DE CONTROLE*\n"
         f"👤 *Agente:* {nome} | *Status:* {status_msg}\n"
         f"═════════════════════════\n\n"
         f"💰 *VALOR ACUMULADO:* R$ {valor_total:.2f}\n"
         f"📋 *Total de Ordens:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
         f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
-        f"🎯 *PROJEÇÃO DE METAS (Restam {dias_rest} dias):*\n"
+        f"🎯 *PROJEÇÃO DE METAS 
         f"• *Faixa 1 ({m_f1}):* {calcular_meta(m_f1)}\n"
         f"• *Faixa 2 ({m_f2}):* {calcular_meta(m_f2)}\n"
         f"• *Faixa 3 ({m_f3}):* {calcular_meta(m_f3)}\n\n"
@@ -178,7 +178,7 @@ def resetar(message):
             usuarios[user_id]['producao_diaria'][dia] = {'corte': 0, 'religacao': 0, 'reaviso': 0}
         usuarios[user_id]['historico'] = []
         
-        bot.reply_to(message, f"🔄 *CICLO REINICIADO*\nAgente {nome}, seus dados de faturamento foram zerados para o novo período.", parse_mode="Markdown")
+        bot.reply_to(message, f"🔄 *SEMANA REINICIADA*\nAgente {nome}, seus dados de faturamento foram zerados para o novo período.", parse_mode="Markdown")
 
 print("Sistema Corporativo Online. Aguardando comandos no Telegram...")
 bot.infinity_polling()
