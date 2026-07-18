@@ -4,7 +4,7 @@ import math
 from flask import Flask
 from threading import Thread
 
-# --- CONFIGURAÇÃO DO SERVIDOR (Evita o erro CRASHED no Railway) ---
+# --- CONFIGURAÇÃO DO SERVIDOR ---
 app = Flask('')
 
 @app.route('/')
@@ -14,16 +14,15 @@ def home():
 def run():
     app.run(host='0.0.0.0', port=8080)
 
-# Inicia o servidor em segundo plano
 t = Thread(target=run)
 t.start()
-# ------------------------------------------------------------------
+# --------------------------------
 
 # Substitua pelo Token do seu bot
 TOKEN = '8820258308:AAHxPYzXUr81ohEZx8cfN7qmADhzL8OYnW8'
 bot = telebot.TeleBot(TOKEN)
 
-# Pesos dos serviços (usados apenas internamente para calcular a equivalência das metas)
+# Pesos dos serviços
 PESO_SERVICO = 13.64 # Corte ou Religação
 PESO_REAVISO = 7.80
 
@@ -55,13 +54,14 @@ def start(message):
     texto = (
         f"🏢 *CONTROLE DE CAMPO*\n"
         f"Fala, {nome}! Bem-vindo ao seu registro operacional.\n\n"
-        "Este sistema registra sua produção, separando Cortes, Religações e Reavisos, e calcula as metas de forma rápida.\n\n"
-        "📌 *COMANDOS RÁPIDOS:*\n"
+        "📌 *COMANDOS DE REGISTRO:*\n"
         "• `/corte [qnt]` - Ex: `/corte 10`\n"
         "• `/rel [qnt]` - Ex: `/rel 5` (Religação)\n"
         "• `/rea [qnt]` - Ex: `/rea 15` (Reaviso)\n\n"
+        "📊 *CONSULTAS E SIMULAÇÕES:*\n"
         "• `/relatorio` - Painel de metas e tabela semanal\n"
-        "• `/resetar` - Inicia um novo ciclo de faturamento"
+        "• `/total [servicos] [reavisos]` - Simula sua meta (Ex: `/total 200 50`)\n"
+        "• `/resetar` - Inicia um novo ciclo"
     )
     bot.reply_to(message, texto, parse_mode="Markdown")
 
@@ -110,6 +110,53 @@ def registrar_servico(message):
     except:
         bot.reply_to(message, f"⚠️ *FALHA NO REGISTRO*\nUse o formato correto. Exemplo: `{comando} 5`", parse_mode="Markdown")
 
+# NOVO COMANDO: SIMULAÇÃO
+@bot.message_handler(commands=['total', 'simular'])
+def simular_meta(message):
+    try:
+        partes = message.text.split()
+        if len(partes) != 3:
+            bot.reply_to(message, "⚠️ *FORMATO DA SIMULAÇÃO*\nUse: `/total [Cortes+Religações] [Reavisos]`\nExemplo: `/total 200 50`\n_(Isso simula 200 serviços e 50 reavisos)_", parse_mode="Markdown")
+            return
+        
+        sim_servicos = int(partes[1])
+        sim_reavisos = int(partes[2])
+        
+        pontos_simulados = (sim_servicos * PESO_SERVICO) + (sim_reavisos * PESO_REAVISO)
+        m_f1, m_f2, m_f3 = 250, 300, 350
+        
+        def calcular_meta_simulada(meta_qnt):
+            meta_pontos = meta_qnt * PESO_SERVICO
+            falta_pontos = meta_pontos - pontos_simulados
+            
+            if falta_pontos <= 0:
+                return "✅ *ALCANÇADA*"
+                
+            faltam_servicos = math.ceil(falta_pontos / PESO_SERVICO)
+            faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
+            return f"Faltam {faltam_servicos} serv. OU {faltam_reavisos} reavisos"
+
+        if pontos_simulados >= (m_f3 * PESO_SERVICO): status_msg = "🟢 FAIXA 3"
+        elif pontos_simulados >= (m_f2 * PESO_SERVICO): status_msg = "🟡 FAIXA 2"
+        elif pontos_simulados >= (m_f1 * PESO_SERVICO): status_msg = "🟠 FAIXA 1"
+        else: status_msg = "🔴 ABAIXO DA META"
+        
+        resposta = (
+            f"🔮 *SIMULAÇÃO DE RESULTADO*\n"
+            f"Serviços (C/R): {sim_servicos} | Reavisos: {sim_reavisos}\n"
+            f"Status Simulado: {status_msg}\n"
+            f"═════════════════════════\n\n"
+            f"🎯 *PROJEÇÃO DA SIMULAÇÃO:*\n"
+            f"• *Faixa 1 (250):* {calcular_meta_simulada(m_f1)}\n"
+            f"• *Faixa 2 (300):* {calcular_meta_simulada(m_f2)}\n"
+            f"• *Faixa 3 (350):* {calcular_meta_simulada(m_f3)}\n\n"
+            f"_(Essa simulação não altera seus registros reais no /relatorio)_"
+        )
+        bot.reply_to(message, resposta, parse_mode="Markdown")
+        
+    except ValueError:
+        bot.reply_to(message, "⚠️ Digite apenas números. Exemplo: `/total 200 50`", parse_mode="Markdown")
+
 @bot.message_handler(commands=['relatorio', 'status'])
 def relatorio(message):
     user_id = message.from_user.id
@@ -120,7 +167,6 @@ def relatorio(message):
     t = dados['totais']
     dias = dados['producao_diaria']
     
-    # Cálculo de pontos base para saber o avanço das metas sem usar R$
     pontos_total = (t['corte'] + t['religacao']) * PESO_SERVICO + (t['reaviso'] * PESO_REAVISO)
     total_servicos_brutos = t['corte'] + t['religacao'] + t['reaviso']
     
