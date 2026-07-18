@@ -157,7 +157,7 @@ def relatorio(message):
         f"📋 *Total de Ordens:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
         f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
-        f"🎯 *PROJEÇÃO DE METAS 
+        f"🎯 *PROJEÇÃO DE METAS(Restam {dias_rest} dias):*\n"
         f"• *Faixa 1 ({m_f1}):* {calcular_meta(m_f1)}\n"
         f"• *Faixa 2 ({m_f2}):* {calcular_meta(m_f2)}\n"
         f"• *Faixa 3 ({m_f3}):* {calcular_meta(m_f3)}\n\n"
