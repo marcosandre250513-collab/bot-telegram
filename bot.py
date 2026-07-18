@@ -123,7 +123,6 @@ def retirar_servico(message):
         partes = message.text.split()
         if len(partes) != 3:
             bot.reply_to(message, "⚠️ *FORMATO INCORRETO*\nPara retirar, use: `/retira [tipo] [qnt]`\nTipos permitidos: `corte`, `rel` ou `rea`\nExemplo: `/retira rea 7`", parse_mode="Markdown")
-            returno do estadual 
 
         tipo_input = partes[1].lower()
         quantidade = int(partes[2])
