@@ -176,16 +176,16 @@ def relatorio(message):
         falta_pontos = meta_pontos - pontos_total
         
         if falta_pontos <= 0:
-            return "✅ *CONCLUÍDA*"
+            return "✅ *BATI A META*"
             
         faltam_servicos = math.ceil(falta_pontos / PESO_SERVICO)
         faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
         
         return f"Faltam {faltam_servicos} serv. OU {faltam_reavisos} reavisos"
 
-    if pontos_total >= (m_f3 * PESO_SERVICO): status_msg = "🟢 FAIXA 3 CONCLUÍDA"
-    elif pontos_total >= (m_f2 * PESO_SERVICO): status_msg = "🟡 FAIXA 2 CONCLUÍDA"
-    elif pontos_total >= (m_f1 * PESO_SERVICO): status_msg = "🟠 FAIXA 1 CONCLUÍDA"
+    if pontos_total >= (m_f3 * PESO_SERVICO): status_msg = "🥉 FAIXA 3 CONCLUÍDA"
+    elif pontos_total >= (m_f2 * PESO_SERVICO): status_msg = "🥈 FAIXA 2 CONCLUÍDA"
+    elif pontos_total >= (m_f1 * PESO_SERVICO): status_msg = "🥇 FAIXA 1 CONCLUÍDA"
     else: status_msg = "🔴 NA BATALHA"
     
     tabela_linhas = []
@@ -197,13 +197,13 @@ def relatorio(message):
     historico_texto = "\n".join(dados['historico']) if dados['historico'] else "Nenhum registro recente."
     
     relatorio_final = (
-        f"📊 *DIÁRIO DE PRODUÇÃO*\n"
+        f"📊 *DIÁRIO  DA MINHA PRODUÇÃO*\n"
         f"👤 *Técnico:* {nome} | *Status:* {status_msg}\n"
         f"═════════════════════════\n\n"
-        f"📋 *Total na Rua:* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
+        f"📋 *Total :* {total_servicos_brutos} (C: {t['corte']} | R: {t['religacao']} | Rv: {t['reaviso']})\n\n"
         f"📅 *PRODUÇÃO DA SEMANA:*\n"
         f"`{tabela_semanal}`\n\n"
-        f"🎯 *PROJEÇÃO DE METAS:*\n"
+        f"🎯 *MINHA PROJEÇÃO PARA CHEGAR NA META:*\n"
         f"• *Faixa 1 ({m_f1}):* {calcular_meta(m_f1)}\n"
         f"• *Faixa 2 ({m_f2}):* {calcular_meta(m_f2)}\n"
         f"• *Faixa 3 ({m_f3}):* {calcular_meta(m_f3)}\n\n"
