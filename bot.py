@@ -1,6 +1,7 @@
 import telebot
 from telebot import types
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import math
 from flask import Flask
 from threading import Thread
@@ -10,6 +11,13 @@ import os
 import random
 import string
 from PIL import Image, ImageDraw, ImageFont
+
+# --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
+FUSO_SP = ZoneInfo('America/Sao_Paulo')
+
+def agora_sp():
+    """Retorna a data e hora atual no fuso oficial de São Paulo (UTC-3)."""
+    return datetime.now(FUSO_SP)
 
 # --- CONFIGURAÇÃO DO SERVIDOR ---
 app = Flask('')
@@ -31,6 +39,7 @@ bot = telebot.TeleBot(TOKEN)
 PESO_SERVICO = 13.64
 PESO_REAVISO = 7.80
 ARQUIVO_BANCO = 'banco_producao.json'
+
 # DIAS ÚTEIS E SÁBADO (SEG A SAB)
 DIAS_SEMANA = {
     0: 'SEG', 1: 'TERCA', 2: 'QUARTA',
@@ -68,8 +77,8 @@ def inicializar_agente(user_id, nome):
 
 def gerar_codigo_controle():
     chars = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-    agora = datetime.now().strftime("%Y%m%d")
-    return f"SYS-{agora}-{chars}"
+    data_str = agora_sp().strftime("%Y%m%d")
+    return f"SYS-{data_str}-{chars}"
 
 # --- BUSCADOR DE FONTES ---
 def get_font(size):
@@ -154,7 +163,9 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg, codigo_
 
     draw.rectangle([0, 0, 900, 130], fill='#020617')
     draw.text((40, 30), "MINHA PERFORMANCE", fill=COR_TEXTO, font=font_title)
-    data_emissao = datetime.now().strftime("%d/%m/%Y - %H:%M:%S")
+    
+    hoje = agora_sp()
+    data_emissao = hoje.strftime("%d/%m/%Y - %H:%M:%S")
     draw.text((40, 80), f"EMISSAO: {data_emissao} | AGENTE: {nome.upper()}", fill=COR_DESTAQUE, font=font_sub)
 
     draw.rectangle([40, 160, 860, 260], fill=COR_CARD, outline=COR_BORDA, width=2)
@@ -177,8 +188,7 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg, codigo_
     y = 430
     valores_dias = []
     
-    # Cálculo das datas de Segunda a Sábado
-    hoje = datetime.now()
+    # Cálculo preciso das datas da semana no fuso de SP (Segunda a Sábado)
     segunda_feira = hoje - timedelta(days=hoje.weekday())
     
     dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
@@ -198,7 +208,7 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg, codigo_
         draw.text((x_tot, y), f"{total_prod}", fill=COR_DESTAQUE, font=font_main)
         y += 40  
 
-    # CARD 2: GRÁFICO DE COLUNAS (BARRAS)
+    # CARD 2: GRÁFICO DE COLUNAS
     draw.rectangle([40, 710, 860, 950], fill=COR_CARD, outline=COR_BORDA, width=2)
     draw.text((60, 730), "DESEMPENHO DIARIO (COLUNAS)", fill=COR_TEXTO, font=font_main)
     draw.line([40, 770, 860, 770], fill=COR_BORDA, width=2)
@@ -228,7 +238,7 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg, codigo_
     draw.text((60, 1000), "STATUS DAS FAIXAS E PROGRESSAO DE METAS", fill=COR_TEXTO, font=font_main)
     draw.line([40, 1040, 860, 1040], fill=COR_BORDA, width=2)
 
-    hoje_idx = datetime.now().weekday()
+    hoje_idx = hoje.weekday()
     dias_restantes = max(1, 6 - hoje_idx)
 
     def text_meta(meta_qnt):
@@ -259,7 +269,7 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg, codigo_
             draw.rectangle([60, y_faixa + 35, 60 + (780 * pct), y_faixa + 50], fill=cor)
         y_faixa += 75
 
-    draw.text((40, 1420), f"TRACKING SYSTEM {datetime.now().year} - TELEMETRIA DE CAMPO", fill=COR_SUBTEXTO, font=font_small)
+    draw.text((40, 1420), f"TRACKING SYSTEM {hoje.year} - TELEMETRIA DE CAMPO", fill=COR_SUBTEXTO, font=font_small)
     draw.text((40, 1445), f"ID DE AUDITORIA: {codigo_controle}", fill=COR_SUBTEXTO, font=font_small)
 
     buffer = io.BytesIO()
@@ -339,7 +349,8 @@ def gerar_imagem_historico(nome, historico, codigo_controle):
         draw.text((60, y_log), f">> {item['data']} | {item['tipo'].upper()}: +{item['quantidade']}", fill=cor_log, font=font_main)
         y_log += 45
 
-    draw.text((40, 1250), f"TRACKING SYSTEM {datetime.now().year} - TELEMETRIA DE CAMPO", fill=COR_SUBTEXTO, font=font_small)
+    hoje = agora_sp()
+    draw.text((40, 1250), f"TRACKING SYSTEM {hoje.year} - TELEMETRIA DE CAMPO", fill=COR_SUBTEXTO, font=font_small)
     draw.text((40, 1275), f"ID DE AUDITORIA: {codigo_controle} - BASE 180 REGISTROS", fill=COR_SUBTEXTO, font=font_small)
 
     buffer = io.BytesIO()
@@ -406,7 +417,7 @@ def add_corte_dia_especifico(message):
             )
 
         dia_chave = mapa_dias[dia_input]
-        agora = datetime.now()
+        agora = agora_sp()
         data_str = agora.strftime("%d/%m/%Y %H:%M")
 
         usuarios[str_id]['producao_diaria'][dia_chave]['corte'] += quantidade
@@ -544,7 +555,7 @@ def retirar_servico(message):
         if len(partes) != 3: return bot.reply_to(message, "⚠️ Ex: `/retira corte 3`", parse_mode="Markdown")
 
         tipo_input, quantidade = partes[1].lower(), int(partes[2])
-        dia_nome = DIAS_SEMANA.get(datetime.now().weekday(), 'SAB')
+        dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
 
         if tipo_input in ['corte']:
             qnt_atual_dia = usuarios[str_id]['producao_diaria'][dia_nome]['corte']
@@ -565,7 +576,7 @@ def retirar_servico(message):
 # PROCESSAMENTO DE BOTÕES E CALLBACKS
 # ==========================================
 def processar_lancamento(user_id, tipo_id, tipo_nome, quantidade):
-    agora = datetime.now()
+    agora = agora_sp()
     dia_nome = DIAS_SEMANA.get(agora.weekday(), 'SAB')
     data_str = agora.strftime("%d/%m/%Y %H:%M")
     
@@ -598,7 +609,7 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "✅ +1 Religação registrada!", show_alert=False)
 
     elif call.data == 'convert_corte_1':
-        dia_nome = DIAS_SEMANA.get(datetime.now().weekday(), 'SAB')
+        dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
         qnt_atual_dia = usuarios[user_id]['producao_diaria'][dia_nome]['corte']
         qnt_atual_total = usuarios[user_id]['totais_semana']['corte']
         
@@ -613,7 +624,7 @@ def callback_handler(call):
             bot.answer_callback_query(call.id, "⚠️ Você não possui cortes nesta semana para converter!", show_alert=True)
 
     elif call.data == 'convert_religacao_1':
-        dia_nome = DIAS_SEMANA.get(datetime.now().weekday(), 'SAB')
+        dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
         qnt_atual_dia = usuarios[user_id]['producao_diaria'][dia_nome]['religacao']
         qnt_atual_total = usuarios[user_id]['totais_semana']['religacao']
         
