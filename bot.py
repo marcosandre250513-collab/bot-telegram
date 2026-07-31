@@ -217,7 +217,7 @@ async def resumo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     # TOKEN CONFIGURADO:
-    TOKEN = "8804109455:AAHWQ08gSyMHytDkmBF8qVr5Ia-HC1_5x_Q"
+    TOKEN = "8899554735:AAE_eCvqX4zmcOP2EM5VaPo8cD1Ast_scWA"
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
