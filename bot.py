@@ -216,7 +216,8 @@ async def resumo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 if __name__ == '__main__':
-    TOKEN = "8804109455:AAHeMGTy2A12ePXD3fjS_n_MST8oVY7oN8k"
+    # TOKEN CONFIGURADO:
+    TOKEN = "8804109455:AAHWQ08gSyMHytDkmBF8qVr5Ia-HC1_5x_Q"
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
