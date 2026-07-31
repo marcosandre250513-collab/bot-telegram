@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS turnos (
 )
 ''')
 
-# Tabela de Ganhos e Gastos
+# Tabela de Transações (Ganhos e Gastos/Despesas)
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS transacoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,21 +32,22 @@ CREATE TABLE IF NOT EXISTS transacoes (
 ''')
 conn.commit()
 
-CUSTO_MANUTENCAO_KM = 0.116  # Estimativa de desgaste por KM para Fan 150 2015
+CUSTO_MANUTENCAO_KM = 0.116  # Desgaste estimado Fan 150 (R$ 0,116/km)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🏍️ **Controle Profissional de Turnos & Ganhos**\n\n"
-        "🟢 /inicio - Abrir turno (KM e Hora inicial)\n"
-        "🔴 /fim - Fechar turno (KM e Hora final)\n"
-        "💰 /ganho - Registrar entrada por categoria\n"
-        "💸 /gasto - Registrar combustível/alimentação\n"
-        "📊 /resumo - Ver balanço do dia e rendimento por KM\n"
-        "📋 /tabela - Exibir histórico recente de ganhos"
+        "🏍️ **Controle Financeiro Profissional - Fan 150**\n\n"
+        "🟢 /inicio - Iniciar turno (KM inicial)\n"
+        "🔴 /fim - Encerrar turno (KM final e cálculo de manutenção)\n\n"
+        "💰 /ganho - Registrar o que ENTROU (iFood, Uber, Particular, Gorjeta)\n"
+        "💸 /despesa - Registrar o que SAIU (Gasolina, Manutenção, Lanche, Contas)\n\n"
+        "📈 /fluxo - Fluxo de Caixa (Total Ganho - Total Pago = Saldo Real)\n"
+        "📋 /tabela_ganhos - Ver histórico recente de entradas\n"
+        "📑 /tabela_gastos - Ver histórico recente de pagamentos/despesas"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-# --- INÍCIO DE TURNO ---
+# --- CONTROLE DE TURNOS ---
 async def inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje = datetime.now().strftime('%Y-%m-%d')
     cursor.execute("SELECT id FROM turnos WHERE data=? AND status='ABERTO'", (hoje,))
@@ -54,38 +55,37 @@ async def inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Você já tem um turno aberto hoje! Envie /fim para encerrar antes de abrir outro.")
         return
 
-    await update.message.reply_text("🟢 **Iniciar Turno**\nEnvie o **KM INICIAL** da moto no painel (ex: `45200`):")
+    await update.message.reply_text("🟢 **Iniciar Turno**\nEnvie o **KM INICIAL** do painel da Fan 150 (ex: `45200`):")
     context.user_data['passo_turno'] = 'km_inicio'
 
-# --- FIM DE TURNO ---
 async def fim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje = datetime.now().strftime('%Y-%m-%d')
     cursor.execute("SELECT id, km_inicio FROM turnos WHERE data=? AND status='ABERTO'", (hoje,))
     turno = cursor.fetchone()
     if not turno:
-        await update.message.reply_text("⚠️ Nenhum turno aberto encontrado para hoje! Use /inicio para começar um.")
+        await update.message.reply_text("⚠️ Nenhum turno aberto encontrado para hoje! Use /inicio para começar.")
         return
 
     context.user_data['turno_id'] = turno[0]
     context.user_data['km_inicio'] = turno[1]
     context.user_data['passo_turno'] = 'km_fim'
-    await update.message.reply_text("🔴 **Encerrar Turno**\nEnvie o **KM FINAL** do painel da moto (ex: `45330`):")
+    await update.message.reply_text("🔴 **Encerrar Turno**\nEnvie o **KM FINAL** do painel (ex: `45330`):")
 
-# --- REGISTRO DE GANHOS ---
+# --- REGISTRO DE GANHOS (ENTRADAS) ---
 async def ganho(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🛵 iFood", callback_data='ganho_iFood'), InlineKeyboardButton("📦 Uber/99", callback_data='ganho_Uber/Apps')],
+        [InlineKeyboardButton("🛵 iFood", callback_data='ganho_iFood'), InlineKeyboardButton("📦 Uber/Apps", callback_data='ganho_Uber/Apps')],
         [InlineKeyboardButton("🏢 Particular", callback_data='ganho_Particular'), InlineKeyboardButton("💰 Gorjeta", callback_data='ganho_Gorjeta')]
     ]
-    await update.message.reply_text("Selecione a origem do ganho:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("🟢 **O que você ganhou?** Selecione a origem:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --- REGISTRO DE GASTOS ---
-async def gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- REGISTRO DE DESPESAS (SAÍDAS / PAGAMENTOS) ---
+async def despesa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("⛽ Gasolina", callback_data='gasto_Gasolina'), InlineKeyboardButton("🍕 Alimentação", callback_data='gasto_Alimentacao')],
-        [InlineKeyboardButton("🛠️ Manutenção", callback_data='gasto_Manutencao'), InlineKeyboardButton("📦 Outros", callback_data='gasto_Outros')]
+        [InlineKeyboardButton("⛽ Gasolina", callback_data='gasto_Gasolina'), InlineKeyboardButton("🛠️ Peças/Óleo", callback_data='gasto_Manutencao')],
+        [InlineKeyboardButton("🍕 Alimentação", callback_data='gasto_Alimentacao'), InlineKeyboardButton("🏠 Contas/Outros", callback_data='gasto_Contas')]
     ]
-    await update.message.reply_text("Selecione a categoria da despesa:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("🔴 **O que você pagou?** Selecione a categoria da despesa:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -95,7 +95,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     context.user_data['tipo_pendente'] = tipo
     context.user_data['cat_pendente'] = cat
-    await query.edit_message_text(text=f"Digite o valor de **{cat}** (ex: 35.50):", parse_mode="Markdown")
+    
+    acao = "ganho em" if tipo == "ganho" else "pagamento de"
+    await query.edit_message_text(text=f"Digite o valor do **{acao} {cat}** (ex: 25.50):", parse_mode="Markdown")
 
 # --- PROCESSAMENTO DE MENSAGENS ---
 async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -103,20 +105,20 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
     hoje = datetime.now().strftime('%Y-%m-%d')
     hora_atual = datetime.now().strftime('%H:%M')
 
-    # Tratar Início de Turno
+    # Tratar KM Inicial
     if context.user_data.get('passo_turno') == 'km_inicio':
         try:
             km_in = float(texto.replace(',', '.'))
             cursor.execute("INSERT INTO turnos (data, hora_inicio, km_inicio, status) VALUES (?, ?, ?, 'ABERTO')", (hoje, hora_atual, km_in))
             conn.commit()
             context.user_data.pop('passo_turno')
-            await update.message.reply_text(f"🟢 **Turno Aberto!**\n⏰ Hora: {hora_atual}\n📏 KM Inicial: {km_in} km\n\nBoa rodagem e boas entregas! 🏍️💨")
+            await update.message.reply_text(f"🟢 **Turno Aberto!**\n⏰ Hora: {hora_atual}\n📏 KM Inicial: {km_in} km\n\nBoas entregas! 🏍️💨")
             return
         except ValueError:
-            await update.message.reply_text("⚠️ KM inválido. Digite apenas o número (ex: 45200).")
+            await update.message.reply_text("⚠️ Digite apenas o número do KM (ex: 45200).")
             return
 
-    # Tratar Fim de Turno
+    # Tratar KM Final
     if context.user_data.get('passo_turno') == 'km_fim':
         try:
             km_fim = float(texto.replace(',', '.'))
@@ -125,7 +127,7 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             context.user_data.pop('passo_turno')
 
             if km_fim < km_in:
-                await update.message.reply_text("⚠️ O KM final não pode ser menor que o KM inicial. Tente novamente.")
+                await update.message.reply_text("⚠️ O KM final não pode ser menor que o inicial. Tente novamente.")
                 return
 
             km_rodados = km_fim - km_in
@@ -135,18 +137,18 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             conn.commit()
 
             msg = (
-                f"🔴 **Turno Encerrado com Sucesso!**\n\n"
+                f"🔴 **Turno Encerrado!**\n\n"
                 f"⏰ Horário: até {hora_atual}\n"
-                f"📏 KM Rodados: **{km_rodados:.1f} km**\n"
-                f"🛠️ Reserva de Manutenção estimada (Fan 150): **R$ {reserva_manutencao:.2f}**"
+                f"📏 Distância percorrida: **{km_rodados:.1f} km**\n"
+                f"🛠️ Reserva de Manutenção estimada: **R$ {reserva_manutencao:.2f}**"
             )
             await update.message.reply_text(msg, parse_mode="Markdown")
             return
         except ValueError:
-            await update.message.reply_text("⚠️ KM inválido. Digite apenas o número.")
+            await update.message.reply_text("⚠️ Digite apenas o número do KM.")
             return
 
-    # Tratar Lançamento de Ganhos / Gastos
+    # Tratar Lançamento de Valores
     if 'tipo_pendente' in context.user_data:
         try:
             valor = float(texto.replace(',', '.'))
@@ -156,13 +158,15 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             cursor.execute("INSERT INTO transacoes (data, tipo, categoria, valor) VALUES (?, ?, ?, ?)", (hoje, tipo, cat, valor))
             conn.commit()
 
-            simbolo = "🟢" if tipo == "ganho" else "🔴"
-            await update.message.reply_text(f"{simbolo} **Registrado:** R$ {valor:.2f} em {cat} na data {datetime.now().strftime('%d/%m/%Y')}", parse_mode="Markdown")
+            if tipo == "ganho":
+                await update.message.reply_text(f"🟢 **Entrada Registrada:** +R$ {valor:.2f} ({cat})", parse_mode="Markdown")
+            else:
+                await update.message.reply_text(f"🔴 **Despesa Registrada:** -R$ {valor:.2f} ({cat})", parse_mode="Markdown")
         except ValueError:
-            await update.message.reply_text("⚠️ Digite um valor numérico válido (ex: 20.50).")
+            await update.message.reply_text("⚠️ Digite um valor válido (ex: 30.00).")
 
-# --- GERAR TABELA DE GANHOS NO TELEGRAM ---
-async def tabela(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- TABELA DE GANHOS ---
+async def tabela_ganhos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("""
         SELECT data, categoria, SUM(valor) 
         FROM transacoes 
@@ -176,20 +180,47 @@ async def tabela(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Nenhum ganho registrado ainda.")
         return
 
-    texto_tabela = "📋 **Tabela de Ganhos Recentes**\n\n"
-    texto_tabela += "`Data       | Origem     | Valor`\n"
-    texto_tabela += "`----------------------------------`\n"
+    texto = "📋 **Tabela de Ganhos Recentes**\n\n"
+    texto += "`Data       | Origem     | Valor`\n"
+    texto += "`----------------------------------`\n"
 
     for reg in registros:
         dt_fmt = datetime.strptime(reg[0], '%Y-%m-%d').strftime('%d/%m')
         cat = reg[1].ljust(10)
         val = f"R$ {reg[2]:.2f}".rjust(9)
-        texto_tabela += f"`{dt_fmt}      | {cat} | {val}`\n"
+        texto += f"`{dt_fmt}      | {cat} | {val}`\n"
 
-    await update.message.reply_text(texto_tabela, parse_mode="Markdown")
+    await update.message.reply_text(texto, parse_mode="Markdown")
 
-# --- RESUMO COMPLETO ---
-async def resumo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- TABELA DE DESPESAS ---
+async def tabela_gastos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cursor.execute("""
+        SELECT data, categoria, SUM(valor) 
+        FROM transacoes 
+        WHERE tipo='gasto' 
+        GROUP BY data, categoria 
+        ORDER BY data DESC LIMIT 10
+    """)
+    registros = cursor.fetchall()
+
+    if not registros:
+        await update.message.reply_text("Nenhuma despesa registrada ainda.")
+        return
+
+    texto = "📑 **Tabela de Despesas Pagas**\n\n"
+    texto += "`Data       | Categoria  | Valor`\n"
+    texto += "`----------------------------------`\n"
+
+    for reg in registros:
+        dt_fmt = datetime.strptime(reg[0], '%Y-%m-%d').strftime('%d/%m')
+        cat = reg[1].ljust(10)
+        val = f"R$ {reg[2]:.2f}".rjust(9)
+        texto += f"`{dt_fmt}      | {cat} | {val}`\n"
+
+    await update.message.reply_text(texto, parse_mode="Markdown")
+
+# --- FLUXO DE CAIXA COMPLETO ---
+async def fluxo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje = datetime.now().strftime('%Y-%m-%d')
     
     cursor.execute("SELECT SUM(valor) FROM transacoes WHERE tipo='ganho' AND data=?", (hoje,))
@@ -203,20 +234,22 @@ async def resumo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     km_total_hoje = sum([(t[1] - t[0]) for t in turnos_hoje]) if turnos_hoje else 0.0
 
     reserva_manut = km_total_hoje * CUSTO_MANUTENCAO_KM
-    lucro_liquido = ganhos - gastos - reserva_manut
+    saldo_caixa = ganhos - gastos
+    lucro_real = saldo_caixa - reserva_manut
 
     msg = (
-        f"📊 **Balanço Diário ({datetime.now().strftime('%d/%m/%Y')})**\n\n"
-        f"🟢 Total Bruto: **R$ {ganhos:.2f}**\n"
-        f"🔴 Despesas Diretas: **R$ {gastos:.2f}**\n"
-        f"🛠️ Reserva Manutenção ({km_total_hoje:.0f}km): **R$ {reserva_manut:.2f}**\n"
+        f"📈 **Fluxo de Caixa do Dia ({datetime.now().strftime('%d/%m/%Y')})**\n\n"
+        f"🟢 **O que Entrou (Ganhos):** R$ {ganhos:.2f}\n"
+        f"🔴 **O que Saiu (Pagamentos):** R$ {gastos:.2f}\n"
         f"----------------------------------\n"
-        f"💵 **Lucro Líquido Real: R$ {lucro_liquido:.2f}**"
+        f"💵 **Saldo Atual em Mão:** R$ {saldo_caixa:.2f}\n"
+        f"🛠️ **Guardar p/ Manutenção ({km_total_hoje:.0f}km):** R$ {reserva_manut:.2f}\n\n"
+        f"⭐ **LÚCRO LÍQUIDO LIMPO:** **R$ {lucro_real:.2f}**"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 if __name__ == '__main__':
-    # TOKEN CONFIGURADO:
+    # SEU NOVO TOKEN CONFIGURADO:
     TOKEN = "8899554735:AAE_eCvqX4zmcOP2EM5VaPo8cD1Ast_scWA"
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -224,11 +257,13 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("inicio", inicio))
     app.add_handler(CommandHandler("fim", fim))
     app.add_handler(CommandHandler("ganho", ganho))
-    app.add_handler(CommandHandler("gasto", gasto))
-    app.add_handler(CommandHandler("tabela", tabela))
-    app.add_handler(CommandHandler("resumo", resumo))
+    app.add_handler(CommandHandler("despesa", despesa))
+    app.add_handler(CommandHandler("gasto", despesa))  # Atalho /gasto também funciona
+    app.add_handler(CommandHandler("fluxo", fluxo))
+    app.add_handler(CommandHandler("tabela_ganhos", tabela_ganhos))
+    app.add_handler(CommandHandler("tabela_gastos", tabela_gastos))
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagens))
 
-    print("Bot de Turnos & Controle Rodando...")
+    print("Bot de Finanças e Turnos Rodando...")
     app.run_polling()
