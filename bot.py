@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS turnos (
 )
 ''')
 
-# Tabela Específica de Teles / Entregas da Lancheria
+# Tabela de Teles
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS teles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS teles (
 )
 ''')
 
-# Tabela de Fechamentos Diários (Soma da Semana e Mês)
+# Tabela de Fechamentos Diários (Soma e Histórico por Dia)
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS fechamentos_diarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS fechamentos_diarios (
 )
 ''')
 
-# Tabela de Transações Gerais
+# Tabela de Transações e Gastos Gerais
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS transacoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +54,19 @@ CREATE TABLE IF NOT EXISTS transacoes (
     tipo TEXT,
     categoria TEXT,
     valor REAL
+)
+''')
+
+# Tabela Específica para Controle de Abastecimento / Média de Combustível
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS abastecimentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data TEXT,
+    km_atual REAL,
+    litros REAL,
+    valor_total REAL,
+    km_rodados_desde_ultimo REAL,
+    media_kml REAL
 )
 ''')
 conn.commit()
@@ -69,7 +82,7 @@ TAXAS_TELES = {
 FRASES_MOTIVACIONAIS = [
     "🚀 Excelente! Mais uma pra conta, acelera!",
     "💰 Dinheiro no bolso! O trabalho duro compensa!",
-    "🏍️💨 Bora pra próxima que a noite tá só começando!",
+    "🏍️💨 Bora pra próxima que a noite tá só começar!",
     "🔥 Ritmo forte! Cada corrida te deixa mais perto do objetivo!",
     "🏆 Boa, monstro das entregas! Mantenha a atenção e o foco!",
     "💪 Mais uma concluída com sucesso! Pilote com segurança!",
@@ -80,7 +93,8 @@ def menu_teclado_principal():
     keyboard = [
         [KeyboardButton("📦 Nova Tele"), KeyboardButton("📊 Fechar Acerto")],
         [KeyboardButton("🟢 Iniciar Turno"), KeyboardButton("🔴 Encerrar Turno")],
-        [KeyboardButton("📈 Meus Ganhos (Dia/Sem/Mês)"), KeyboardButton("💸 Registrar Gastos")]
+        [KeyboardButton("📈 Meus Ganhos (Dia/Sem/Mês)"), KeyboardButton("🗓️ Histórico de Acertos")],
+        [KeyboardButton("💸 Registrar Gastos"), KeyboardButton("⛽ Média de Combustível")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -111,8 +125,8 @@ def atualizar_tabela_diaria(hoje):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🚀 **Controle Rápido de Teles & Ganhos**\n\n"
-        "Use os botões na tela para registrar rapidamente suas entregas e acompanhar seus ganhos!"
+        "🚀 **Controle Profissional de Teles & Moto**\n\n"
+        "Use os botões abaixo para registrar entregas, gastos com gasolina, médias de consumo e consultar seus acertos acumulados!"
     )
     await update.message.reply_text(msg, reply_markup=menu_teclado_principal(), parse_mode="Markdown")
 
@@ -168,7 +182,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 conn.commit()
 
-                # Atualiza os totais e pega resumo
                 qtd_hoje, total_hoje = atualizar_tabela_diaria(hoje)
                 frase = random.choice(FRASES_MOTIVACIONAIS)
 
@@ -186,8 +199,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif prefixo == 'gasto':
         cat = data[1]
-        context.user_data['cat_pendente'] = cat
-        await query.edit_message_text(text=f"Digite o valor do gasto com **{cat}** (ex: 20.00):", parse_mode="Markdown")
+        if cat == 'Gasolina':
+            context.user_data['passo_combustivel'] = 'valor_pago'
+            await query.edit_message_text(text="⛽ **Registro de Combustível**\n\nDigite quanto você **pagou em R$** no posto (ex: 30.00):", parse_mode="Markdown")
+        else:
+            context.user_data['cat_pendente'] = cat
+            await query.edit_message_text(text=f"Digite o valor do gasto com **{cat}** (ex: 20.00):", parse_mode="Markdown")
 
 async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
@@ -209,9 +226,92 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif texto == "📈 Meus Ganhos (Dia/Sem/Mês)":
         await meus_ganhos(update, context)
         return
+    elif texto == "🗓️ Histórico de Acertos":
+        await historico_acertos(update, context)
+        return
     elif texto == "💸 Registrar Gastos":
         await despesa(update, context)
         return
+    elif texto == "⛽ Média de Combustível":
+        await relatorio_combustivel(update, context)
+        return
+
+    # Processamento de Abastecimento (Passo a Passo)
+    if context.user_data.get('passo_combustivel') == 'valor_pago':
+        try:
+            val = float(texto.replace(',', '.'))
+            context.user_data['abast_valor'] = val
+            context.user_data['passo_combustivel'] = 'litros'
+            await update.message.reply_text("⛽ Quantos **LITROS** deu na bomba? (ex: 5.2):")
+            return
+        except ValueError:
+            await update.message.reply_text("⚠️ Digite um valor numérico válido (ex: 30.00).")
+            return
+
+    if context.user_data.get('passo_combustivel') == 'litros':
+        try:
+            litros = float(texto.replace(',', '.'))
+            context.user_data['abast_litros'] = litros
+            context.user_data['passo_combustivel'] = 'km_atual'
+            await update.message.reply_text("📏 Qual o **KM ATUAL DA MOTO** no painel? (ex: 45200):")
+            return
+        except ValueError:
+            await update.message.reply_text("⚠️ Digite a quantidade de litros (ex: 5.2).")
+            return
+
+    if context.user_data.get('passo_combustivel') == 'km_atual':
+        try:
+            km_atual = float(texto.replace(',', '.'))
+            val_pago = context.user_data.pop('abast_valor')
+            litros = context.user_data.pop('abast_litros')
+            context.user_data.pop('passo_combustivel')
+
+            # Registra como gasto geral de gasolina
+            cursor.execute("INSERT INTO transacoes (data, tipo, categoria, valor) VALUES (?, 'gasto', 'Gasolina', ?)", (hoje, val_pago))
+
+            # Busca último abastecimento para calcular a média
+            cursor.execute("SELECT km_atual FROM abastecimentos ORDER BY id DESC LIMIT 1")
+            ultimo = cursor.fetchone()
+
+            km_rodados = 0.0
+            media_kml = 0.0
+
+            if ultimo and ultimo[0]:
+                ultimo_km = ultimo[0]
+                if km_atual > ultimo_km:
+                    km_rodados = km_atual - ultimo_km
+                    media_kml = km_rodados / litros if litros > 0 else 0.0
+
+            cursor.execute('''
+                INSERT INTO abastecimentos (data, km_atual, litros, valor_total, km_rodados_desde_ultimo, media_kml)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (hoje, km_atual, litros, val_pago, km_rodados, media_kml))
+            conn.commit()
+
+            msg = (
+                f"⛽ **Abastecimento Registrado!**\n\n"
+                f"💵 **Valor Pago:** R$ {val_pago:.2f}\n"
+                f"⛽ **Litros:** {litros:.2f}L\n"
+                f"📏 **KM Painel:** {km_atual:.1f} km\n"
+            )
+
+            if media_kml > 0:
+                cost_per_km = val_pago / km_rodados if km_rodados > 0 else 0
+                msg += (
+                    f"------------------------------\n"
+                    f"📊 **RESULTADO DESTE TANQUE:**\n"
+                    f"🛣️ **KM Rodados no Tanque:** {km_rodados:.1f} km\n"
+                    f"🔥 **Média de Consumo:** **{media_kml:.2f} KM/L**\n"
+                    f"💸 **Custo por KM:** R$ {cost_per_km:.2f}/km"
+                )
+            else:
+                msg += "\nℹ️ *Média será calculada automaticamente no próximo abastecimento!*"
+
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=menu_teclado_principal())
+            return
+        except ValueError:
+            await update.message.reply_text("⚠️ Digite apenas os números do KM (ex: 45200).")
+            return
 
     # Entrada de valor em Dinheiro da Tele
     if context.user_data.get('aguardando_valor_dinheiro'):
@@ -228,7 +328,6 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             conn.commit()
 
-            # Atualiza os totais e pega resumo
             qtd_hoje, total_hoje = atualizar_tabela_diaria(hoje)
             frase = random.choice(FRASES_MOTIVACIONAIS)
 
@@ -255,7 +354,6 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             conn.commit()
             context.user_data.pop('passo_turno')
             
-            # Já registra a arrancada inicial de R$ 30
             atualizar_tabela_diaria(hoje)
             
             await update.message.reply_text(f"🟢 **Turno Aberto!**\n⏰ {hora_atual} | KM: {km_in}\n💵 Arrancada: R$ 30,00 cadastrada!", reply_markup=menu_teclado_principal())
@@ -288,7 +386,7 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚠️ Digite apenas números para o KM.")
             return
 
-    # Tratamento de Gastos
+    # Tratamento de Outros Gastos
     if 'cat_pendente' in context.user_data:
         try:
             valor = float(texto.replace(',', '.'))
@@ -355,7 +453,7 @@ async def acerto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lucro_total_dia = arrancada + total_taxas
     diferenca = lucro_total_dia - total_dinheiro_em_mao
 
-    # Atualiza a tabela diária no acerto final
+    # Salva/atualiza o acerto completo no histórico do dia
     atualizar_tabela_diaria(hoje)
 
     msg = (
@@ -377,6 +475,69 @@ async def acerto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         msg += f"🤝 **CONTA ZERADA!** (Valores bateram exato)"
 
+    msg += "\n\n💾 *Acerto gravado com sucesso no seu histórico diário!*"
+
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=menu_teclado_principal())
+
+async def historico_acertos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cursor.execute("SELECT data, total_teles, valor_teles, arrancada, lucro_liquido_diario FROM fechamentos_diarios ORDER BY data DESC LIMIT 15")
+    registros = cursor.fetchall()
+
+    if not registros:
+        await update.message.reply_text("⚠️ Nenhum acerto gravado ainda.")
+        return
+
+    total_geral_teles = sum(r[1] for r in registros)
+    total_geral_faturado = sum(r[4] for r in registros)
+
+    msg = "🗓️ **HISTÓRICO DE ACERTOS DIÁRIOS**\n\n"
+    for r in registros:
+        dt_fmt = datetime.strptime(r[0], '%Y-%m-%d').strftime('%d/%m/%Y')
+        msg += f"📅 **{dt_fmt}**:\n   📦 {r[1]} teles | 💰 R$ {r[4]:.2f}\n"
+
+    msg += (
+        f"----------------------------------\n"
+        f"📊 **TOTAL ACUMULADO NOS DIAS:**\n"
+        f"📦 Total Teles: **{total_geral_teles} entregas**\n"
+        f"💰 Faturamento Total: **R$ {total_geral_faturado:.2f}**"
+    )
+
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=menu_teclado_principal())
+
+async def relatorio_combustivel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cursor.execute("SELECT data, km_atual, litros, valor_total, km_rodados_desde_ultimo, media_kml FROM abastecimentos ORDER BY id DESC LIMIT 5")
+    abast = cursor.fetchall()
+
+    if not abast:
+        await update.message.reply_text("⛽ **Controle de Combustível**\n\nNenhum abastecimento gravado ainda.\nPara começar, acesse **💸 Registrar Gastos** -> **⛽ Gasolina**.")
+        return
+
+    msg = "⛽ **RELATÓRIO DE COMBUSTÍVEL & MÉDIAS**\n\n"
+    
+    medias_validas = [a[5] for a in abast if a[5] > 0]
+    total_litros = sum(a[2] for a in abast)
+    total_gasto = sum(a[3] for a in abast)
+    total_km = sum(a[4] for a in abast)
+
+    for a in abast:
+        dt_fmt = datetime.strptime(a[0], '%Y-%m-%d').strftime('%d/%m')
+        if a[5] > 0:
+            msg += f"📅 **{dt_fmt}** - {a[2]:.1f}L (R$ {a[3]:.2f})\n   🛣️ {a[4]:.1f} km rodados | 🔥 **{a[5]:.2f} KM/L**\n\n"
+        else:
+            msg += f"📅 **{dt_fmt}** - {a[2]:.1f}L (R$ {a[3]:.2f}) - *Início da medição*\n\n"
+
+    if medias_validas:
+        media_geral = sum(medias_validas) / len(medias_validas)
+        custo_medio_km = total_gasto / total_km if total_km > 0 else 0
+        msg += (
+            f"----------------------------------\n"
+            f"📊 **RESUMO GERAL:**\n"
+            f"⭐ **Sua Média Geral:** **{media_geral:.2f} KM/1L**\n"
+            f"🛣️ Total KM Rodados Medidos: **{total_km:.1f} km**\n"
+            f"⛽ Total Litros Consumidos: **{total_litros:.2f} L**\n"
+            f"💸 Custo de Gasolina/KM: **R$ {custo_medio_km:.2f}/km**"
+        )
+
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=menu_teclado_principal())
 
 async def meus_ganhos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -386,25 +547,21 @@ async def meus_ganhos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inicio_semana = (hoje_dt - timedelta(days=hoje_dt.weekday())).strftime('%Y-%m-%d')
     inicio_mes = hoje_dt.strftime('%Y-%m-01')
 
-    # Ganho de Hoje
     cursor.execute("SELECT total_teles, lucro_liquido_diario FROM fechamentos_diarios WHERE data=?", (hoje_str,))
     hoje_dados = cursor.fetchone()
     teles_hoje = hoje_dados[0] if hoje_dados else 0
     ganho_hoje = hoje_dados[1] if hoje_dados else 0.0
 
-    # Ganho da Semana
     cursor.execute("SELECT SUM(total_teles), SUM(lucro_liquido_diario) FROM fechamentos_diarios WHERE data >= ?", (inicio_semana,))
     sem_dados = cursor.fetchone()
     teles_sem = sem_dados[0] or 0
     ganho_sem = sem_dados[1] or 0.0
 
-    # Ganho do Mês
     cursor.execute("SELECT SUM(total_teles), SUM(lucro_liquido_diario) FROM fechamentos_diarios WHERE data >= ?", (inicio_mes,))
     mes_dados = cursor.fetchone()
     teles_mes = mes_dados[0] or 0
     ganho_mes = mes_dados[1] or 0.0
 
-    # Gastos do Mês
     cursor.execute("SELECT SUM(valor) FROM transacoes WHERE tipo='gasto' AND data >= ?", (inicio_mes,))
     gastos_mes = cursor.fetchone()[0] or 0.0
 
