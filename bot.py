@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS teles (
     data TEXT,
     destino TEXT,
     valor_tele REAL,
+    quantidade INTEGER DEFAULT 1,
     forma_pagamento TEXT,
     valor_dinheiro_recebido REAL DEFAULT 0.0
 )
@@ -82,7 +83,7 @@ TAXAS_TELES = {
 FRASES_MOTIVACIONAIS = [
     "🚀 Excelente! Mais uma pra conta, acelera!",
     "💰 Dinheiro no bolso! O trabalho duro compensa!",
-    "🏍️💨 Bora pra próxima que a noite tá só começar!",
+    "🏍️💨 Bora pra próxima que a noite tá só começando!",
     "🔥 Ritmo forte! Cada corrida te deixa mais perto do objetivo!",
     "🏆 Boa, monstro das entregas! Mantenha a atenção e o foco!",
     "💪 Mais uma concluída com sucesso! Pilote com segurança!",
@@ -103,11 +104,11 @@ def atualizar_tabela_diaria(hoje):
     turno = cursor.fetchone()
     arrancada = turno[0] if turno else 30.0
 
-    cursor.execute("SELECT valor_tele FROM teles WHERE data=?", (hoje,))
+    cursor.execute("SELECT valor_tele, quantidade FROM teles WHERE data=?", (hoje,))
     teles = cursor.fetchall()
     
-    total_qtd = len(teles)
-    total_valor = sum(t[0] for t in teles)
+    total_qtd = sum(t[1] for t in teles)
+    total_valor = sum(t[0] * t[1] for t in teles)
     total_liquido = arrancada + total_valor
 
     cursor.execute('''
@@ -126,7 +127,7 @@ def atualizar_tabela_diaria(hoje):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🚀 **Controle Profissional de Teles & Moto**\n\n"
-        "Use os botões abaixo para registrar entregas, gastos com gasolina, médias de consumo e consultar seus acertos acumulados!"
+        "Use os botões abaixo para registrar entregas (com opção de quantidade), gastos, médias de consumo e acertos!"
     )
     await update.message.reply_text(msg, reply_markup=menu_teclado_principal(), parse_mode="Markdown")
 
@@ -152,42 +153,56 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['tele_destino'] = destino
             context.user_data['tele_valor_taxa'] = TAXAS_TELES[destino]
 
+            # Seleção de Quantidade de Teles
             keyboard = [
-                [InlineKeyboardButton("💳 Pix / Cartão", callback_data='tele_pag_Pix/Cartao')],
-                [InlineKeyboardButton("💵 Dinheiro", callback_data='tele_pag_Dinheiro')]
+                [InlineKeyboardButton("1 Tele", callback_data='tele_qtd_1'), InlineKeyboardButton("2 Teles", callback_data='tele_qtd_2')],
+                [InlineKeyboardButton("3 Teles", callback_data='tele_qtd_3'), InlineKeyboardButton("4 Teles", callback_data='tele_qtd_4')],
+                [InlineKeyboardButton("✏️ Outra Quantidade", callback_data='tele_qtd_custom')]
             ]
             await query.edit_message_text(
-                text=f"📍 **{destino}** (Taxa R$ {TAXAS_TELES[destino]:.2f})\n\nComo o cliente pagou?",
+                text=f"📍 **{destino}** (Taxa R$ {TAXAS_TELES[destino]:.2f}/cada)\n\n**Quantas teles** você está levando para esse destino?",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
+
+        elif sub_tipo == 'qtd':
+            qtd_str = data[2]
+            if qtd_str == 'custom':
+                await query.edit_message_text(text="✏️ Digite no chat **quantas teles** você está levando (ex: 5):")
+                context.user_data['aguardando_qtd_custom'] = True
+            else:
+                qtd = int(qtd_str)
+                context.user_data['tele_qtd'] = qtd
+                await pedir_forma_pagamento(query, context)
 
         elif sub_tipo == 'pag':
             forma_pag = data[2]
             context.user_data['tele_forma_pag'] = forma_pag
             destino = context.user_data.get('tele_destino')
             valor_taxa = context.user_data.get('tele_valor_taxa')
+            qtd = context.user_data.get('tele_qtd', 1)
 
             if forma_pag == 'Dinheiro':
                 await query.edit_message_text(
-                    text=f"💵 Tele em **Dinheiro** ({destino}).\n\nDigite o **VALOR TOTAL** cobrado do cliente (Lanche + Tele):",
+                    text=f"💵 **{qtd}x Tele(s) em Dinheiro** ({destino}).\n\nDigite o **VALOR TOTAL** cobrado do cliente (Lanches + Taxas):",
                     parse_mode="Markdown"
                 )
                 context.user_data['aguardando_valor_dinheiro'] = True
             else:
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 cursor.execute(
-                    "INSERT INTO teles (data, destino, valor_tele, forma_pagamento, valor_dinheiro_recebido) VALUES (?, ?, ?, ?, 0.0)",
-                    (hoje, destino, valor_taxa, forma_pag)
+                    "INSERT INTO teles (data, destino, valor_tele, quantidade, forma_pagamento, valor_dinheiro_recebido) VALUES (?, ?, ?, ?, ?, 0.0)",
+                    (hoje, destino, valor_taxa, qtd, forma_pag)
                 )
                 conn.commit()
 
                 qtd_hoje, total_hoje = atualizar_tabela_diaria(hoje)
                 frase = random.choice(FRASES_MOTIVACIONAIS)
+                total_ganho_tele = valor_taxa * qtd
 
                 await query.edit_message_text(
                     text=(
-                        f"✅ **Tele Registrada! (+R$ {valor_taxa:.2f})**\n"
+                        f"✅ **{qtd}x Tele(s) Registrada(s)! (+R$ {total_ganho_tele:.2f})**\n"
                         f"📍 Destino: {destino} | 💳 {forma_pag}\n\n"
                         f"📊 **PLACAR DO DIA:**\n"
                         f"📦 Teles Hoje: **{qtd_hoje} entregas**\n"
@@ -205,6 +220,23 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             context.user_data['cat_pendente'] = cat
             await query.edit_message_text(text=f"Digite o valor do gasto com **{cat}** (ex: 20.00):", parse_mode="Markdown")
+
+async def pedir_forma_pagamento(query_or_update, context: ContextTypes.DEFAULT_TYPE):
+    destino = context.user_data.get('tele_destino')
+    valor_taxa = context.user_data.get('tele_valor_taxa')
+    qtd = context.user_data.get('tele_qtd', 1)
+    total_taxa = valor_taxa * qtd
+
+    keyboard = [
+        [InlineKeyboardButton("💳 Pix / Cartão", callback_data='tele_pag_Pix/Cartao')],
+        [InlineKeyboardButton("💵 Dinheiro", callback_data='tele_pag_Dinheiro')]
+    ]
+    txt = f"📍 **{destino}** | 📦 **{qtd}x Tele(s)** (Total Taxa: R$ {total_taxa:.2f})\n\nComo foi o pagamento?"
+
+    if hasattr(query_or_update, 'edit_message_text'):
+        await query_or_update.edit_message_text(text=txt, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await query_or_update.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
@@ -236,6 +268,56 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
         await relatorio_combustivel(update, context)
         return
 
+    # Processamento de Quantidade Customizada de Teles
+    if context.user_data.get('aguardando_qtd_custom'):
+        try:
+            qtd = int(texto)
+            if qtd <= 0:
+                await update.message.reply_text("⚠️ Digite uma quantidade maior que zero.")
+                return
+            context.user_data['tele_qtd'] = qtd
+            context.user_data.pop('aguardando_qtd_custom')
+            await pedir_forma_pagamento(update.message, context)
+            return
+        except ValueError:
+            await update.message.reply_text("⚠️ Digite apenas um número inteiro (ex: 5).")
+            return
+
+    # Entrada de valor em Dinheiro da Tele
+    if context.user_data.get('aguardando_valor_dinheiro'):
+        try:
+            valor_dinheiro = float(texto.replace(',', '.'))
+            destino = context.user_data.pop('tele_destino')
+            valor_taxa = context.user_data.pop('tele_valor_taxa')
+            qtd = context.user_data.pop('tele_qtd', 1)
+            forma_pag = context.user_data.pop('tele_forma_pag')
+            context.user_data.pop('aguardando_valor_dinheiro')
+
+            cursor.execute(
+                "INSERT INTO teles (data, destino, valor_tele, quantidade, forma_pagamento, valor_dinheiro_recebido) VALUES (?, ?, ?, ?, ?, ?)",
+                (hoje, destino, valor_taxa, qtd, forma_pag, valor_dinheiro)
+            )
+            conn.commit()
+
+            qtd_hoje, total_hoje = atualizar_tabela_diaria(hoje)
+            frase = random.choice(FRASES_MOTIVACIONAIS)
+            total_ganho_tele = valor_taxa * qtd
+
+            await update.message.reply_text(
+                f"✅ **{qtd}x Tele(s) Registrada(s)! (+R$ {total_ganho_tele:.2f})**\n"
+                f"📍 Destino: {destino} | 💵 Recebido: R$ {valor_dinheiro:.2f}\n\n"
+                f"📊 **PLACAR DO DIA:**\n"
+                f"📦 Teles Hoje: **{qtd_hoje} entregas**\n"
+                f"💰 Total Acumulado Hoje: **R$ {total_hoje:.2f}**\n\n"
+                f"{frase}",
+                parse_mode="Markdown",
+                reply_markup=menu_teclado_principal()
+            )
+            return
+        except ValueError:
+            await update.message.reply_text("⚠️ Digite um valor válido (ex: 38.00).")
+            return
+
     # Processamento de Abastecimento (Passo a Passo)
     if context.user_data.get('passo_combustivel') == 'valor_pago':
         try:
@@ -266,10 +348,8 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             litros = context.user_data.pop('abast_litros')
             context.user_data.pop('passo_combustivel')
 
-            # Registra como gasto geral de gasolina
             cursor.execute("INSERT INTO transacoes (data, tipo, categoria, valor) VALUES (?, 'gasto', 'Gasolina', ?)", (hoje, val_pago))
 
-            # Busca último abastecimento para calcular a média
             cursor.execute("SELECT km_atual FROM abastecimentos ORDER BY id DESC LIMIT 1")
             ultimo = cursor.fetchone()
 
@@ -311,39 +391,6 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         except ValueError:
             await update.message.reply_text("⚠️ Digite apenas os números do KM (ex: 45200).")
-            return
-
-    # Entrada de valor em Dinheiro da Tele
-    if context.user_data.get('aguardando_valor_dinheiro'):
-        try:
-            valor_dinheiro = float(texto.replace(',', '.'))
-            destino = context.user_data.pop('tele_destino')
-            valor_taxa = context.user_data.pop('tele_valor_taxa')
-            forma_pag = context.user_data.pop('tele_forma_pag')
-            context.user_data.pop('aguardando_valor_dinheiro')
-
-            cursor.execute(
-                "INSERT INTO teles (data, destino, valor_tele, forma_pagamento, valor_dinheiro_recebido) VALUES (?, ?, ?, ?, ?)",
-                (hoje, destino, valor_taxa, forma_pag, valor_dinheiro)
-            )
-            conn.commit()
-
-            qtd_hoje, total_hoje = atualizar_tabela_diaria(hoje)
-            frase = random.choice(FRASES_MOTIVACIONAIS)
-
-            await update.message.reply_text(
-                f"✅ **Tele Registrada! (+R$ {valor_taxa:.2f})**\n"
-                f"📍 Destino: {destino} | 💵 Recebido: R$ {valor_dinheiro:.2f}\n\n"
-                f"📊 **PLACAR DO DIA:**\n"
-                f"📦 Teles Hoje: **{qtd_hoje} entregas**\n"
-                f"💰 Total Acumulado Hoje: **R$ {total_hoje:.2f}**\n\n"
-                f"{frase}",
-                parse_mode="Markdown",
-                reply_markup=menu_teclado_principal()
-            )
-            return
-        except ValueError:
-            await update.message.reply_text("⚠️ Digite um valor válido (ex: 38.00).")
             return
 
     # Entrada de KM Inicial
@@ -435,25 +482,24 @@ async def acerto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     turno = cursor.fetchone()
     arrancada = turno[0] if turno else 30.0
 
-    cursor.execute("SELECT destino, valor_tele, forma_pagamento, valor_dinheiro_recebido FROM teles WHERE data=?", (hoje,))
+    cursor.execute("SELECT destino, valor_tele, quantidade, forma_pagamento, valor_dinheiro_recebido FROM teles WHERE data=?", (hoje,))
     teles = cursor.fetchall()
 
     if not teles:
         await update.message.reply_text("⚠️ Nenhuma tele registrada hoje para fechar acerto!")
         return
 
-    total_teles_qtd = len(teles)
-    total_taxas = sum(t[1] for t in teles)
-    total_dinheiro_em_mao = sum(t[3] for t in teles)
+    total_teles_qtd = sum(t[2] for t in teles)
+    total_taxas = sum(t[1] * t[2] for t in teles)
+    total_dinheiro_em_mao = sum(t[4] for t in teles)
 
-    cidade_qtd = sum(1 for t in teles if t[0] == 'Cidade')
-    passo_qtd = sum(1 for t in teles if t[0] == 'Passo da Cruz')
-    acacia_qtd = sum(1 for t in teles if t[0] == 'Acacia')
+    cidade_qtd = sum(t[2] for t in teles if t[0] == 'Cidade')
+    passo_qtd = sum(t[2] for t in teles if t[0] == 'Passo da Cruz')
+    acacia_qtd = sum(t[2] for t in teles if t[0] == 'Acacia')
 
     lucro_total_dia = arrancada + total_taxas
     diferenca = lucro_total_dia - total_dinheiro_em_mao
 
-    # Salva/atualiza o acerto completo no histórico do dia
     atualizar_tabela_diaria(hoje)
 
     msg = (
