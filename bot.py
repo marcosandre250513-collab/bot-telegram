@@ -1,4 +1,5 @@
 import sqlite3
+import random
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS fechamentos_diarios (
 )
 ''')
 
-# Tabela de Transações Gerais (Gasto/Outros)
+# Tabela de Transações Gerais
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS transacoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +66,16 @@ TAXAS_TELES = {
     'Acacia': 14.00
 }
 
-# --- MENU COM BOTÕES RÁPIDOS NA TELA ---
+FRASES_MOTIVACIONAIS = [
+    "🚀 Excelente! Mais uma pra conta, acelera!",
+    "💰 Dinheiro no bolso! O trabalho duro compensa!",
+    "🏍️💨 Bora pra próxima que a noite tá só começando!",
+    "🔥 Ritmo forte! Cada corrida te deixa mais perto do objetivo!",
+    "🏆 Boa, monstro das entregas! Mantenha a atenção e o foco!",
+    "💪 Mais uma concluída com sucesso! Pilote com segurança!",
+    "📊 O faturamento não para de subir! Acelera!"
+]
+
 def menu_teclado_principal():
     keyboard = [
         [KeyboardButton("📦 Nova Tele"), KeyboardButton("📊 Fechar Acerto")],
@@ -74,6 +84,31 @@ def menu_teclado_principal():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+def atualizar_tabela_diaria(hoje):
+    cursor.execute("SELECT arrancada FROM turnos WHERE data=?", (hoje,))
+    turno = cursor.fetchone()
+    arrancada = turno[0] if turno else 30.0
+
+    cursor.execute("SELECT valor_tele FROM teles WHERE data=?", (hoje,))
+    teles = cursor.fetchall()
+    
+    total_qtd = len(teles)
+    total_valor = sum(t[0] for t in teles)
+    total_liquido = arrancada + total_valor
+
+    cursor.execute('''
+        INSERT INTO fechamentos_diarios (data, total_teles, valor_teles, arrancada, lucro_liquido_diario)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(data) DO UPDATE SET
+            total_teles=excluded.total_teles,
+            valor_teles=excluded.valor_teles,
+            arrancada=excluded.arrancada,
+            lucro_liquido_diario=excluded.lucro_liquido_diario
+    ''', (hoje, total_qtd, total_valor, arrancada, total_liquido))
+    conn.commit()
+    
+    return total_qtd, total_liquido
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🚀 **Controle Rápido de Teles & Ganhos**\n\n"
@@ -81,7 +116,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, reply_markup=menu_teclado_principal(), parse_mode="Markdown")
 
-# --- REGISTRO DE TELE-ENTREGAS ---
 async def tele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🏙️ Cidade (R$ 8,00)", callback_data='tele_destino_Cidade')],
@@ -90,7 +124,6 @@ async def tele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("📦 **Qual o destino da tele?**", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --- GESTÃO DE BOTÕES INTERATIVOS (INLINE) ---
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -135,8 +168,19 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 conn.commit()
 
+                # Atualiza os totais e pega resumo
+                qtd_hoje, total_hoje = atualizar_tabela_diaria(hoje)
+                frase = random.choice(FRASES_MOTIVACIONAIS)
+
                 await query.edit_message_text(
-                    text=f"✅ **Tele Registrada!**\n📍 Destino: {destino}\n💳 Pagamento: {forma_pag}\n💰 Sua Taxa: R$ {valor_taxa:.2f}",
+                    text=(
+                        f"✅ **Tele Registrada! (+R$ {valor_taxa:.2f})**\n"
+                        f"📍 Destino: {destino} | 💳 {forma_pag}\n\n"
+                        f"📊 **PLACAR DO DIA:**\n"
+                        f"📦 Teles Hoje: **{qtd_hoje} entregas**\n"
+                        f"💰 Total Acumulado Hoje: **R$ {total_hoje:.2f}**\n\n"
+                        f"{frase}"
+                    ),
                     parse_mode="Markdown"
                 )
 
@@ -145,13 +189,11 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['cat_pendente'] = cat
         await query.edit_message_text(text=f"Digite o valor do gasto com **{cat}** (ex: 20.00):", parse_mode="Markdown")
 
-# --- PROCESSAMENTO DE RESPOSTAS E TEXTOS ---
 async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = update.message.text.strip()
     hoje = datetime.now().strftime('%Y-%m-%d')
     hora_atual = datetime.now().strftime('%H:%M')
 
-    # Tratar cliques nos Botões do Teclado Principal
     if texto == "📦 Nova Tele":
         await tele(update, context)
         return
@@ -186,8 +228,17 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             conn.commit()
 
+            # Atualiza os totais e pega resumo
+            qtd_hoje, total_hoje = atualizar_tabela_diaria(hoje)
+            frase = random.choice(FRASES_MOTIVACIONAIS)
+
             await update.message.reply_text(
-                f"✅ **Tele Registrada!**\n📍 Destino: {destino}\n💰 Sua Taxa: R$ {valor_taxa:.2f}\n💵 Recebido em Dinheiro: R$ {valor_dinheiro:.2f}",
+                f"✅ **Tele Registrada! (+R$ {valor_taxa:.2f})**\n"
+                f"📍 Destino: {destino} | 💵 Recebido: R$ {valor_dinheiro:.2f}\n\n"
+                f"📊 **PLACAR DO DIA:**\n"
+                f"📦 Teles Hoje: **{qtd_hoje} entregas**\n"
+                f"💰 Total Acumulado Hoje: **R$ {total_hoje:.2f}**\n\n"
+                f"{frase}",
                 parse_mode="Markdown",
                 reply_markup=menu_teclado_principal()
             )
@@ -203,7 +254,11 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             cursor.execute("INSERT INTO turnos (data, hora_inicio, km_inicio, arrancada, status) VALUES (?, ?, ?, 30.0, 'ABERTO')", (hoje, hora_atual, km_in))
             conn.commit()
             context.user_data.pop('passo_turno')
-            await update.message.reply_text(f"🟢 **Turno Aberto!**\n⏰ {hora_atual} | KM: {km_in}\n💵 Arrancada: R$ 30,00", reply_markup=menu_teclado_principal())
+            
+            # Já registra a arrancada inicial de R$ 30
+            atualizar_tabela_diaria(hoje)
+            
+            await update.message.reply_text(f"🟢 **Turno Aberto!**\n⏰ {hora_atual} | KM: {km_in}\n💵 Arrancada: R$ 30,00 cadastrada!", reply_markup=menu_teclado_principal())
             return
         except ValueError:
             await update.message.reply_text("⚠️ Digite apenas números para o KM.")
@@ -245,7 +300,6 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
         except ValueError:
             await update.message.reply_text("⚠️ Digite um valor numérico válido.")
 
-# --- COMANDOS AUXILIARES ---
 async def inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje = datetime.now().strftime('%Y-%m-%d')
     cursor.execute("SELECT id FROM turnos WHERE data=? AND status='ABERTO'", (hoje,))
@@ -276,7 +330,6 @@ async def despesa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("🔴 **Qual a categoria da despesa?**", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# --- ACERTO E SALVAMENTO DIÁRIO ---
 async def acerto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje = datetime.now().strftime('%Y-%m-%d')
 
@@ -302,17 +355,8 @@ async def acerto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lucro_total_dia = arrancada + total_taxas
     diferenca = lucro_total_dia - total_dinheiro_em_mao
 
-    # Salva ou atualiza a soma na tabela acumuladora do dia
-    cursor.execute('''
-        INSERT INTO fechamentos_diarios (data, total_teles, valor_teles, arrancada, lucro_liquido_diario)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(data) DO UPDATE SET
-            total_teles=excluded.total_teles,
-            valor_teles=excluded.valor_teles,
-            arrancada=excluded.arrancada,
-            lucro_liquido_diario=excluded.lucro_liquido_diario
-    ''', (hoje, total_teles_qtd, total_taxas, arrancada, lucro_total_dia))
-    conn.commit()
+    # Atualiza a tabela diária no acerto final
+    atualizar_tabela_diaria(hoje)
 
     msg = (
         f"📊 **ACERTO DE CONTAS - LANCHERIA ({datetime.now().strftime('%d/%m/%Y')})**\n\n"
@@ -333,15 +377,12 @@ async def acerto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         msg += f"🤝 **CONTA ZERADA!** (Valores bateram exato)"
 
-    msg += "\n\n💾 *Valores somados automaticamente no seu acumulado da semana e mês!*"
     await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=menu_teclado_principal())
 
-# --- GANHOS ACUMULADOS (HOJE, SEMANA, MÊS) ---
 async def meus_ganhos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hoje_dt = datetime.now()
     hoje_str = hoje_dt.strftime('%Y-%m-%d')
     
-    # Calcular início da semana (segunda-feira)
     inicio_semana = (hoje_dt - timedelta(days=hoje_dt.weekday())).strftime('%Y-%m-%d')
     inicio_mes = hoje_dt.strftime('%Y-%m-01')
 
@@ -398,5 +439,5 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagens))
 
-    print("Bot Prático de Teles & Ganhos Rodando...")
+    print("Bot Motivacional de Teles & Ganhos Rodando...")
     app.run_polling()
