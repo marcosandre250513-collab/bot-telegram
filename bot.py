@@ -8,69 +8,72 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 conn = sqlite3.connect('financeiro_motoboy_turnos.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Tabela de Turnos
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS turnos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data TEXT,
-    hora_inicio TEXT,
-    hora_fim TEXT,
-    km_inicio REAL,
-    km_fim REAL,
-    arrancada REAL DEFAULT 30.0,
-    status TEXT
-)
-''')
+def criar_tabelas():
+    # Tabela de Turnos
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS turnos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT,
+        hora_inicio TEXT,
+        hora_fim TEXT,
+        km_inicio REAL,
+        km_fim REAL,
+        arrancada REAL DEFAULT 30.0,
+        status TEXT
+    )
+    ''')
 
-# Tabela de Teles
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS teles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data TEXT,
-    destino TEXT,
-    valor_tele REAL,
-    quantidade INTEGER DEFAULT 1,
-    forma_pagamento TEXT,
-    valor_dinheiro_recebido REAL DEFAULT 0.0
-)
-''')
+    # Tabela de Teles
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS teles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT,
+        destino TEXT,
+        valor_tele REAL,
+        quantidade INTEGER DEFAULT 1,
+        forma_pagamento TEXT,
+        valor_dinheiro_recebido REAL DEFAULT 0.0
+    )
+    ''')
 
-# Tabela de Fechamentos Diários (Soma e Histórico por Dia)
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS fechamentos_diarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data TEXT UNIQUE,
-    total_teles INTEGER,
-    valor_teles REAL,
-    arrancada REAL,
-    lucro_liquido_diario REAL
-)
-''')
+    # Tabela de Fechamentos Diários
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS fechamentos_diarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT UNIQUE,
+        total_teles INTEGER,
+        valor_teles REAL,
+        arrancada REAL,
+        lucro_liquido_diario REAL
+    )
+    ''')
 
-# Tabela de Transações e Gastos Gerais
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS transacoes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data TEXT,
-    tipo TEXT,
-    categoria TEXT,
-    valor REAL
-)
-''')
+    # Tabela de Transações e Gastos Gerais
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS transacoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT,
+        tipo TEXT,
+        categoria TEXT,
+        valor REAL
+    )
+    ''')
 
-# Tabela Específica para Controle de Abastecimento / Média de Combustível
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS abastecimentos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    data TEXT,
-    km_atual REAL,
-    litros REAL,
-    valor_total REAL,
-    km_rodados_desde_ultimo REAL,
-    media_kml REAL
-)
-''')
-conn.commit()
+    # Tabela Específica para Controle de Abastecimento
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS abastecimentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT,
+        km_atual REAL,
+        litros REAL,
+        valor_total REAL,
+        km_rodados_desde_ultimo REAL,
+        media_kml REAL
+    )
+    ''')
+    conn.commit()
+
+criar_tabelas()
 
 CUSTO_MANUTENCAO_KM = 0.116  # Desgaste estimado Fan 150 (R$ 0,116/km)
 
@@ -127,9 +130,23 @@ def atualizar_tabela_diaria(hoje):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🚀 **Controle Profissional de Teles & Moto**\n\n"
-        "Use os botões abaixo para registrar entregas (com opção de quantidade), gastos, médias de consumo e acertos!"
+        "Use os botões abaixo para registrar entregas, gastos, médias de consumo e acertos!\n"
+        "ℹ️ *Para apagar todo o banco de dados e recomeçar do zero, digite:* `/zerar`"
     )
     await update.message.reply_text(msg, reply_markup=menu_teclado_principal(), parse_mode="Markdown")
+
+async def zerar_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("⚠️ SIM, ZERAR TUDO!", callback_data='confirmar_zerar_sim')],
+        [InlineKeyboardButton("❌ Cancelar", callback_data='confirmar_zerar_nao')]
+    ]
+    await update.message.reply_text(
+        "🚨 **ATENÇÃO! VOCÊ ESTÁ PRESTES A ZERAR TUDO!** 🚨\n\n"
+        "Isso apagar todos os registros de teles, acertos, turnos, gastos e abastecimentos do banco de dados.\n\n"
+        "Tem certeza que deseja continuar?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
 
 async def tele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -145,6 +162,25 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data.split('_')
     prefixo = data[0]
 
+    # Confirmação de Zerar Tudo
+    if prefixo == 'confirmar':
+        acao = data[2]
+        if acao == 'sim':
+            cursor.execute("DELETE FROM turnos")
+            cursor.execute("DELETE FROM teles")
+            cursor.execute("DELETE FROM fechamentos_diarios")
+            cursor.execute("DELETE FROM transacoes")
+            cursor.execute("DELETE FROM abastecimentos")
+            conn.commit()
+            
+            await query.edit_message_text(
+                "💥 **TODOS OS DADOS FORAM ZERADOS COM SUCESSO!**\n\nO banco de dados foi limpo e está pronto para novos registros.",
+                parse_mode="Markdown"
+            )
+        else:
+            await query.edit_message_text("❌ **Operação cancelada.** Seus dados continuam salvos normalmente.")
+        return
+
     if prefixo == 'tele':
         sub_tipo = data[1]
         
@@ -153,7 +189,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['tele_destino'] = destino
             context.user_data['tele_valor_taxa'] = TAXAS_TELES[destino]
 
-            # Seleção de Quantidade de Teles
             keyboard = [
                 [InlineKeyboardButton("1 Tele", callback_data='tele_qtd_1'), InlineKeyboardButton("2 Teles", callback_data='tele_qtd_2')],
                 [InlineKeyboardButton("3 Teles", callback_data='tele_qtd_3'), InlineKeyboardButton("4 Teles", callback_data='tele_qtd_4')],
@@ -268,7 +303,7 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
         await relatorio_combustivel(update, context)
         return
 
-    # Processamento de Quantidade Customizada de Teles
+    # Processamento de Quantidade Customizada
     if context.user_data.get('aguardando_qtd_custom'):
         try:
             qtd = int(texto)
@@ -318,7 +353,7 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⚠️ Digite um valor válido (ex: 38.00).")
             return
 
-    # Processamento de Abastecimento (Passo a Passo)
+    # Processamento de Abastecimento
     if context.user_data.get('passo_combustivel') == 'valor_pago':
         try:
             val = float(texto.replace(',', '.'))
@@ -638,6 +673,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("inicio", inicio))
     app.add_handler(CommandHandler("fim", fim))
     app.add_handler(CommandHandler("despesa", despesa))
+    app.add_handler(CommandHandler("zerar", zerar_comando))
     
     app.add_handler(CallbackQueryHandler(button_click))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagens))
