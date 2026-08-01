@@ -1,8 +1,10 @@
+import os
 import sqlite3
 import random
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from weasyprint import HTML
 
 # --- BANCO DE DADOS ---
 conn = sqlite3.connect('financeiro_motoboy_turnos.db', check_same_thread=False)
@@ -97,8 +99,9 @@ def menu_teclado_principal():
     keyboard = [
         [KeyboardButton("📦 Nova Tele"), KeyboardButton("📊 Fechar Acerto")],
         [KeyboardButton("🟢 Iniciar Turno"), KeyboardButton("🔴 Encerrar Turno")],
-        [KeyboardButton("📈 Meus Ganhos (Dia/Sem/Mês)"), KeyboardButton("🗓️ Histórico de Acertos")],
-        [KeyboardButton("💸 Registrar Gastos"), KeyboardButton("⛽ Média de Combustível")]
+        [KeyboardButton("📈 Meus Ganhos (Dia/Sem/Mês)"), KeyboardButton("📑 Relatório PDF Semanal")],
+        [KeyboardButton("🗓️ Histórico de Acertos"), KeyboardButton("💸 Registrar Gastos")],
+        [KeyboardButton("⛽ Média de Combustível")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -130,7 +133,7 @@ def atualizar_tabela_diaria(hoje):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🚀 **Controle Profissional de Teles & Moto**\n\n"
-        "Use os botões abaixo para registrar entregas, gastos, médias de consumo e acertos!\n"
+        "Use os botões abaixo para registrar entregas, gastos, médias de consumo, acertos e relatórios em PDF!\n"
         "ℹ️ *Para apagar todo o banco de dados e recomeçar do zero, digite:* `/zerar`"
     )
     await update.message.reply_text(msg, reply_markup=menu_teclado_principal(), parse_mode="Markdown")
@@ -142,11 +145,310 @@ async def zerar_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text(
         "🚨 **ATENÇÃO! VOCÊ ESTÁ PRESTES A ZERAR TUDO!** 🚨\n\n"
-        "Isso apagar todos os registros de teles, acertos, turnos, gastos e abastecimentos do banco de dados.\n\n"
+        "Isso apagará todos os registros de teles, acertos, turnos, gastos e abastecimentos do banco de dados.\n\n"
         "Tem certeza que deseja continuar?",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
+
+async def gerarpdf_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ **Gerando Relatório Semanal em PDF... Por favor, aguarde!**")
+    
+    hoje_dt = datetime.now()
+    inicio_semana = hoje_dt - timedelta(days=hoje_dt.weekday())
+    fim_semana = inicio_semana + timedelta(days=6)
+    
+    str_inicio = inicio_semana.strftime('%Y-%m-%d')
+    str_fim = fim_semana.strftime('%Y-%m-%d')
+
+    dias_semana_nome = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    
+    dias_html = ""
+    
+    total_semana_arrancada = 0.0
+    total_semana_teles_valor = 0.0
+    total_semana_bruto = 0.0
+    total_semana_gastos = 0.0
+    total_semana_teles_qtd = 0
+
+    for i in range(7):
+        cur_dt = inicio_semana + timedelta(days=i)
+        cur_str = cur_dt.strftime('%Y-%m-%d')
+        data_fmt = cur_dt.strftime('%d/%m/%Y')
+        dia_nome = dias_semana_nome[i]
+
+        cursor.execute("SELECT arrancada FROM turnos WHERE data=?", (cur_str,))
+        row_turno = cursor.fetchone()
+        arrancada_dia = row_turno[0] if row_turno else 30.0
+
+        cursor.execute("SELECT destino, valor_tele, quantidade, forma_pagamento, valor_dinheiro_recebido FROM teles WHERE data=?", (cur_str,))
+        teles_dia = cursor.fetchall()
+
+        cursor.execute("SELECT categoria, valor FROM transacoes WHERE tipo='gasto' AND data=?", (cur_str,))
+        gastos_dia = cursor.fetchall()
+
+        qtd_cidade = sum(t[2] for t in teles_dia if t[0] == 'Cidade')
+        qtd_passo = sum(t[2] for t in teles_dia if t[0] == 'Passo da Cruz')
+        qtd_acacia = sum(t[2] for t in teles_dia if t[0] == 'Acacia')
+        qtd_total_dia = sum(t[2] for t in teles_dia)
+
+        val_teles_dia = sum(t[1] * t[2] for t in teles_dia)
+        val_gastos_dia = sum(g[1] for g in gastos_dia)
+        
+        bruto_dia = arrancada_dia + val_teles_dia
+        liquido_dia = bruto_dia - val_gastos_dia
+
+        total_semana_arrancada += arrancada_dia
+        total_semana_teles_valor += val_teles_dia
+        total_semana_bruto += bruto_dia
+        total_semana_gastos += val_gastos_dia
+        total_semana_teles_qtd += qtd_total_dia
+
+        dias_html += f"""
+        <div class="day-card">
+            <div class="day-header">
+                <h3>{dia_nome} - {data_fmt}</h3>
+                <span class="badge-profit">Líquido: R$ {liquido_dia:.2f}</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item / Descrição</th>
+                        <th>Qtd</th>
+                        <th>Arrancada (Fixo)</th>
+                        <th>Taxas / Valor</th>
+                        <th>Subtotal Bruto</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Arrancada Diária Guaranteed</strong></td>
+                        <td>1x</td>
+                        <td>R$ {arrancada_dia:.2f}</td>
+                        <td>-</td>
+                        <td><strong>R$ {arrancada_dia:.2f}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Teles Cidade (R$ 8,00)</td>
+                        <td>{qtd_cidade}</td>
+                        <td>-</td>
+                        <td>R$ {qtd_cidade * 8.0:.2f}</td>
+                        <td>R$ {qtd_cidade * 8.0:.2f}</td>
+                    </tr>
+                    <tr>
+                        <td>Teles Passo da Cruz (R$ 13,00)</td>
+                        <td>{qtd_passo}</td>
+                        <td>-</td>
+                        <td>R$ {qtd_passo * 13.0:.2f}</td>
+                        <td>R$ {qtd_passo * 13.0:.2f}</td>
+                    </tr>
+                    <tr>
+                        <td>Teles Acácia (R$ 14,00)</td>
+                        <td>{qtd_acacia}</td>
+                        <td>-</td>
+                        <td>R$ {qtd_acacia * 14.0:.2f}</td>
+                        <td>R$ {qtd_acacia * 14.0:.2f}</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="day-footer">
+                <div><strong>Total entregas:</strong> {qtd_total_dia} teles</div>
+                <div><strong>Gastos do Dia:</strong> R$ {val_gastos_dia:.2f}</div>
+                <div><strong>Faturamento Bruto (Arrancada + Teles):</strong> R$ {bruto_dia:.2f}</div>
+            </div>
+        </div>
+        """
+
+    lucro_liquido_semana = total_semana_bruto - total_semana_gastos
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            @page {{
+                size: A4;
+                margin: 15mm 12mm;
+                background-color: #0f172a;
+            }}
+            * {{
+                box-sizing: border-box;
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            }}
+            body {{
+                margin: 0;
+                padding: 0;
+                color: #f8fafc;
+                background-color: #0f172a;
+            }}
+            .header {{
+                text-align: center;
+                padding: 20px;
+                background: linear-gradient(135deg, #1e293b, #334155);
+                border-radius: 12px;
+                border: 1px solid #475569;
+                margin-bottom: 25px;
+            }}
+            .header h1 {{
+                margin: 0 0 5px 0;
+                font-size: 24pt;
+                color: #38bdf8;
+                text-transform: uppercase;
+                letter-spacing: 1.5px;
+            }}
+            .header p {{
+                margin: 0;
+                font-size: 11pt;
+                color: #94a3b8;
+            }}
+            .summary-grid {{
+                display: table;
+                width: 100%;
+                margin-bottom: 25px;
+            }}
+            .summary-card {{
+                display: table-cell;
+                width: 25%;
+                background: #1e293b;
+                padding: 15px;
+                border-radius: 8px;
+                border: 1px solid #334155;
+                text-align: center;
+            }}
+            .summary-card .title {{
+                font-size: 9pt;
+                color: #94a3b8;
+                text-transform: uppercase;
+                margin-bottom: 5px;
+            }}
+            .summary-card .value {{
+                font-size: 16pt;
+                font-weight: bold;
+                color: #38bdf8;
+            }}
+            .summary-card .value.green {{
+                color: #4ade80;
+            }}
+            .summary-card .value.red {{
+                color: #f87171;
+            }}
+            .day-card {{
+                background: #1e293b;
+                border-radius: 10px;
+                border: 1px solid #334155;
+                margin-bottom: 20px;
+                padding: 15px;
+                page-break-inside: avoid;
+            }}
+            .day-header {{
+                display: table;
+                width: 100%;
+                margin-bottom: 12px;
+                border-bottom: 1px solid #334155;
+                padding-bottom: 8px;
+            }}
+            .day-header h3 {{
+                display: table-cell;
+                margin: 0;
+                font-size: 13pt;
+                color: #f1f5f9;
+            }}
+            .badge-profit {{
+                display: table-cell;
+                text-align: right;
+                font-weight: bold;
+                color: #4ade80;
+                font-size: 11pt;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 10px;
+            }}
+            th, td {{
+                padding: 8px 10px;
+                text-align: left;
+                font-size: 9.5pt;
+                border-bottom: 1px solid #334155;
+            }}
+            th {{
+                background-color: #0f172a;
+                color: #94a3b8;
+                font-weight: 600;
+                text-transform: uppercase;
+                font-size: 8.5pt;
+            }}
+            td {{
+                color: #cbd5e1;
+            }}
+            .day-footer {{
+                display: table;
+                width: 100%;
+                font-size: 9.5pt;
+                color: #94a3b8;
+                padding-top: 5px;
+            }}
+            .day-footer div {{
+                display: table-cell;
+            }}
+            .day-footer div:nth-child(2) {{
+                text-align: center;
+            }}
+            .day-footer div:nth-child(3) {{
+                text-align: right;
+                color: #f8fafc;
+            }}
+            .footer-note {{
+                text-align: center;
+                font-size: 9pt;
+                color: #64748b;
+                margin-top: 20px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Relatório Semanal de Desempenho</h1>
+            <p>Fechamento de Conta & Performance de Entregas | Período: {inicio_semana.strftime('%d/%m/%Y')} a {fim_semana.strftime('%d/%m/%Y')}</p>
+        </div>
+
+        <div class="summary-grid">
+            <div class="summary-card">
+                <div class="title">Total Arrancadas</div>
+                <div class="value">R$ {total_semana_arrancada:.2f}</div>
+            </div>
+            <div class="summary-card">
+                <div class="title">Total Taxas Teles</div>
+                <div class="value">R$ {total_semana_teles_valor:.2f}</div>
+            </div>
+            <div class="summary-card">
+                <div class="title">Faturamento Bruto</div>
+                <div class="value green">R$ {total_semana_bruto:.2f}</div>
+            </div>
+            <div class="summary-card">
+                <div class="title">Lucro Líquido Semana</div>
+                <div class="value green">R$ {lucro_liquido_semana:.2f}</div>
+            </div>
+        </div>
+
+        {dias_html}
+
+        <div class="footer-note">
+            <p>Relatório gerado automaticamente pelo Sistema de Gestão Financeira para Motoboys Pro.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+    pdf_filename = f"Relatorio_Semanal_{inicio_semana.strftime('%d-%m-%Y')}.pdf"
+    HTML(string=html_content).write_pdf(pdf_filename)
+
+    with open(pdf_filename, 'rb') as doc:
+        await update.message.reply_document(document=doc, filename=pdf_filename, caption="📊 **Seu Relatório Semanal em PDF está pronto!**")
+
+    if os.path.exists(pdf_filename):
+        os.remove(pdf_filename)
 
 async def tele(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -241,7 +543,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"📍 Destino: {destino} | 💳 {forma_pag}\n\n"
                         f"📊 **PLACAR DO DIA:**\n"
                         f"📦 Teles Hoje: **{qtd_hoje} entregas**\n"
-                        f"💰 Total Acumulado Hoje: **R$ {total_hoje:.2f}**\n\n"
+                        f"💰 Total Acumulado Hoje (Com Arrancada): **R$ {total_hoje:.2f}**\n\n"
                         f"{frase}"
                     ),
                     parse_mode="Markdown"
@@ -293,6 +595,9 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif texto == "📈 Meus Ganhos (Dia/Sem/Mês)":
         await meus_ganhos(update, context)
         return
+    elif texto == "📑 Relatório PDF Semanal":
+        await gerarpdf_comando(update, context)
+        return
     elif texto == "🗓️ Histórico de Acertos":
         await historico_acertos(update, context)
         return
@@ -343,7 +648,7 @@ async def processar_mensagens(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"📍 Destino: {destino} | 💵 Recebido: R$ {valor_dinheiro:.2f}\n\n"
                 f"📊 **PLACAR DO DIA:**\n"
                 f"📦 Teles Hoje: **{qtd_hoje} entregas**\n"
-                f"💰 Total Acumulado Hoje: **R$ {total_hoje:.2f}**\n\n"
+                f"💰 Total Acumulado Hoje (Com Arrancada): **R$ {total_hoje:.2f}**\n\n"
                 f"{frase}",
                 parse_mode="Markdown",
                 reply_markup=menu_teclado_principal()
@@ -670,6 +975,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("tele", tele))
     app.add_handler(CommandHandler("acerto", acerto))
     app.add_handler(CommandHandler("meus_ganhos", meus_ganhos))
+    app.add_handler(CommandHandler("gerarpdf", gerarpdf_comando))
     app.add_handler(CommandHandler("inicio", inicio))
     app.add_handler(CommandHandler("fim", fim))
     app.add_handler(CommandHandler("despesa", despesa))
