@@ -1,8 +1,10 @@
 import os
 import socket
 import uuid
+import ssl
 import urllib.request
 from datetime import datetime, timezone
+from PIL import Image as PILImage
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, Update
 from telegram.ext import (
     Application,
@@ -14,7 +16,7 @@ from telegram.ext import (
 )
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 # Estados da conversa
@@ -63,7 +65,6 @@ async def get_localizacao(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     reply_keyboard = [['SIM', 'NÃO']]
     
-    # Pergunta geral para confirmar todos de uma vez
     msg = (
         "<b>CHECKLIST DE SEGURANÇA APR:</b>\n\n"
         "1. Possuo equipamentos e ferramentas em condições de segurança?\n"
@@ -83,8 +84,6 @@ async def get_localizacao(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def get_perguntas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     ans = update.message.text.upper()
-    
-    # Preenche todas as respostas com a opção escolhida (SIM ou NÃO)
     context.user_data['answers'] = [ans] * len(QUESTIONS)
     
     await update.message.reply_text(
@@ -92,6 +91,42 @@ async def get_perguntas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         reply_markup=ReplyKeyboardRemove()
     )
     return FOTO
+
+def download_static_map(lat, lon, output_path):
+    """Baixa o mapa estático tentando múltiplos provedores com suporte a SSL bypass."""
+    urls = [
+        f"https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=16&size=400x300&markers={lat},{lon},ol-marker-red",
+        f"https://static-maps.yandex.ru/1.x/?lang=pt_BR&ll={lon},{lat}&z=16&l=map&pt={lon},{lat},pm2rdm&size=400,300"
+    ]
+    
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, context=ssl_context, timeout=8) as resp, open(output_path, 'wb') as out:
+                out.write(resp.read())
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                return output_path
+        except Exception:
+            continue
+    return None
+
+def get_proportional_image(path, max_w, max_h):
+    """Redimensiona mantendo a proporção original sem distorcer a foto."""
+    try:
+        with PILImage.open(path) as img:
+            w, h = img.size
+        ratio = min(max_w / w, max_h / h)
+        return RLImage(path, width=w * ratio, height=h * ratio)
+    except Exception:
+        return RLImage(path, width=max_w, height=max_h)
 
 async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     photo_file = await update.message.photo[-1].get_file()
@@ -103,28 +138,11 @@ async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     await update.message.reply_text("Gerando o comprovante em PDF com o mapa e foto...")
     
-    # Baixar mapa via Geoapify / CartoDB estático com marcador
     map_path = f"mapa_{update.effective_user.id}.png"
     lat, lon = context.user_data['lat'], context.user_data['lon']
     
-    # URL do gerador de mapa estável e limpo
-    map_url = f"https://maps.geoapify.com/v1/staticmap?style=osm-bright&width=400&height=300&center=lonlat:{lon},{lat}&zoom=16&marker=lonlat:{lon},{lat};color:%23ff0000;size:medium&apiKey=c518b0e8c07e4c70a1a0f9b0c201d4a0"
-    
-    try:
-        req = urllib.request.Request(map_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as resp, open(map_path, 'wb') as out:
-            out.write(resp.read())
-        context.user_data['map_path'] = map_path
-    except Exception:
-        # Fallback de mapa secundário caso a API principal oscile
-        try:
-            map_url_alt = f"https://static-maps.yandex.ru/1.x/?lang=pt_BR&ll={lon},{lat}&z=16&l=map&pt={lon},{lat},pm2rdm&size=400,300"
-            req = urllib.request.Request(map_url_alt, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as resp, open(map_path, 'wb') as out:
-                out.write(resp.read())
-            context.user_data['map_path'] = map_path
-        except Exception:
-            context.user_data['map_path'] = None
+    saved_map = download_static_map(lat, lon, map_path)
+    context.user_data['map_path'] = saved_map
 
     pdf_path = generate_pdf(update, context)
     
@@ -154,11 +172,11 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     subtitle_style = ParagraphStyle('Subtitle', parent=styles['Heading2'], fontSize=12, leading=14, textColor=colors.HexColor('#2B6CB0'))
     normal_style = styles['Normal']
     
-    # Título do PDF
+    # Título
     story.append(Paragraph(f"<b>RELATÓRIO DE APR - MEDIDOR: {medidor_num}</b>", title_style))
     story.append(Spacer(1, 10))
     
-    # Tabela de Dados Gerais
+    # Dados Gerais
     info_data = [
         ["ID APR:", context.user_data['id_apr'], "LATITUDE:", str(context.user_data['lat'])],
         ["MATRÍCULA:", context.user_data['matricula'], "LONGITUDE:", str(context.user_data['lon'])],
@@ -178,7 +196,7 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     story.append(t_info)
     story.append(Spacer(1, 12))
     
-    # Checklist APR
+    # Checklist
     story.append(Paragraph("<b>CHECKLIST DE SEGURANÇA (APR)</b>", subtitle_style))
     story.append(Spacer(1, 5))
     
@@ -189,14 +207,14 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         
     story.append(Spacer(1, 15))
     
-    # Fotos e Mapa Lado a Lado
+    # Imagens Proporcionais
     story.append(Paragraph("<b>COMPROVANTE (FOTO E LOCALIZAÇÃO)</b>", subtitle_style))
     story.append(Spacer(1, 8))
     
-    img_foto = Image(context.user_data['photo_path'], width=230, height=170)
+    img_foto = get_proportional_image(context.user_data['photo_path'], max_w=240, max_h=180)
     
     if context.user_data.get('map_path') and os.path.exists(context.user_data['map_path']):
-        img_mapa = Image(context.user_data['map_path'], width=230, height=170)
+        img_mapa = get_proportional_image(context.user_data['map_path'], max_w=240, max_h=180)
     else:
         img_mapa = Paragraph("<i>Mapa indisponível</i>", normal_style)
     
