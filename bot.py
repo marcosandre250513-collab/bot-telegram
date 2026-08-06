@@ -1,4 +1,3 @@
-import hashlib
 import os
 import socket
 import uuid
@@ -18,7 +17,7 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-# Definindo os estados da conversa
+# Estados da conversa
 MATRICULA, MEDIDOR, LOCALIZACAO, PERGUNTAS, FOTO = range(5)
 
 # Lista de perguntas do checklist APR
@@ -48,7 +47,6 @@ async def get_matricula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def get_medidor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['medidor'] = update.message.text
     
-    # Teclado especial para envio rápido de localização
     button = KeyboardButton(text="📍 Enviar minha localização atual", request_location=True)
     keyboard = ReplyKeyboardMarkup([[button]], one_time_keyboard=True, resize_keyboard=True)
     
@@ -103,17 +101,17 @@ async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     await update.message.reply_text("Gerando o comprovante em PDF com o mapa e foto...")
     
-    # Baixar mapa estático
+    # Baixar mapa estilo OpenStreetMap / Google limpo com marcador
     map_path = f"mapa_{update.effective_user.id}.png"
     lat, lon = context.user_data['lat'], context.user_data['lon']
-    map_url = f"https://static-maps.yandex.ru/1.x/?lang=pt_BR&ll={lon},{lat}&z=16&l=map&pt={lon},{lat},pm2rdm&size=300,200"
+    map_url = f"https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=16&size=400x300&markers={lat},{lon},ol-marker-red"
     
     try:
         req = urllib.request.Request(map_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req) as resp, open(map_path, 'wb') as out:
             out.write(resp.read())
         context.user_data['map_path'] = map_path
-    except Exception as e:
+    except Exception:
         context.user_data['map_path'] = None
 
     pdf_path = generate_pdf(update, context)
@@ -127,7 +125,6 @@ async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             parse_mode="Markdown"
         )
         
-    # Limpeza de arquivos temporários
     for path in [photo_path, map_path, pdf_path]:
         if path and os.path.exists(path):
             os.remove(path)
@@ -145,16 +142,9 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     subtitle_style = ParagraphStyle('Subtitle', parent=styles['Heading2'], fontSize=12, leading=14, textColor=colors.HexColor('#2B6CB0'))
     normal_style = styles['Normal']
     
-    # Título do PDF com número do medidor (Substituiu o SMART APR FORENSIC REPORT)
+    # Título do PDF
     story.append(Paragraph(f"<b>RELATÓRIO DE APR - MEDIDOR: {medidor_num}</b>", title_style))
     story.append(Spacer(1, 10))
-    
-    # Cálculo de hashes para integridade
-    with open(context.user_data['photo_path'], 'rb') as f:
-        hash_foto = hashlib.sha256(f.read()).hexdigest()
-        
-    raw_data = f"{context.user_data['id_apr']}{context.user_data['matricula']}{context.user_data['lat']}{context.user_data['lon']}"
-    hash_apr = hashlib.sha256(raw_data.encode()).hexdigest()
     
     # Tabela de Dados Gerais
     info_data = [
@@ -185,16 +175,10 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         story.append(Paragraph(f"Resposta: <b>{a}</b>", normal_style))
         story.append(Spacer(1, 3))
         
-    story.append(Spacer(1, 10))
-    
-    # Integridade Forense / Registro Digital
-    story.append(Paragraph("<b>REGISTRO DE INTEGRIDADE DIGITAL</b>", subtitle_style))
-    story.append(Paragraph(f"<b>HASH SHA256 APR:</b><br/>{hash_apr}", normal_style))
-    story.append(Paragraph(f"<b>HASH FOTO FINAL:</b><br/>{hash_foto}", normal_style))
     story.append(Spacer(1, 15))
     
     # Fotos e Mapa Lado a Lado
-    story.append(Paragraph("<b>COMPROVANTES DE REGISTRO (FOTO E LOCALIZAÇÃO)</b>", subtitle_style))
+    story.append(Paragraph("<b>COMPROVANTE (FOTO E LOCALIZAÇÃO)</b>", subtitle_style))
     story.append(Spacer(1, 8))
     
     img_foto = Image(context.user_data['photo_path'], width=230, height=170)
