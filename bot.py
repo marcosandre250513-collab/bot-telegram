@@ -2,9 +2,10 @@ import os
 import socket
 import uuid
 import ssl
+import math
 import urllib.request
 from datetime import datetime, timezone
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps, ImageDraw
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, Update
 from telegram.ext import (
     Application,
@@ -92,37 +93,67 @@ async def get_perguntas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     )
     return FOTO
 
-def download_static_map(lat, lon, output_path):
-    """Baixa o mapa estático tentando múltiplos provedores com suporte a SSL bypass."""
-    urls = [
-        f"https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=16&size=400x300&markers={lat},{lon},ol-marker-red",
-        f"https://static-maps.yandex.ru/1.x/?lang=pt_BR&ll={lon},{lat}&z=16&l=map&pt={lon},{lat},pm2rdm&size=400,300"
-    ]
-    
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+def generate_osm_map(lat, lon, output_path, zoom=16, width=400, height=300):
+    """Gera um mapa nativo baixando tiles do OpenStreetMap e desenhando marcador no centro."""
+    try:
+        lat_rad = math.radians(lat)
+        n = 2 ** zoom
+        xtile_float = (lon + 180.0) / 360.0 * n
+        ytile_float = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
 
-    for url in urls:
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, context=ssl_context, timeout=8) as resp, open(output_path, 'wb') as out:
-                out.write(resp.read())
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-                return output_path
-        except Exception:
-            continue
-    return None
+        xtile = int(xtile_float)
+        ytile = int(ytile_float)
+
+        x_offset = int((xtile_float - xtile) * 256)
+        y_offset = int((ytile_float - ytile) * 256)
+
+        canvas = PILImage.new('RGB', (256 * 3, 256 * 3), color=(240, 240, 240))
+        
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) APRBot/1.0'}
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                tile_x, tile_y = xtile + dx, ytile + dy
+                url = f"https://tile.openstreetmap.org/{zoom}/{tile_x}/{tile_y}.png"
+                req = urllib.request.Request(url, headers=headers)
+                try:
+                    with urllib.request.urlopen(req, context=ssl_ctx, timeout=4) as resp:
+                        tile_img = PILImage.open(resp)
+                        canvas.paste(tile_img, ((dx + 1) * 256, (dy + 1) * 256))
+                except Exception:
+                    pass
+
+        center_x = 256 + x_offset
+        center_y = 256 + y_offset
+
+        left = max(0, center_x - (width // 2))
+        top = max(0, center_y - (height // 2))
+        cropped = canvas.crop((left, top, left + width, top + height))
+
+        # Desenhar Marcador (Pin Vermelho) no centro exato
+        draw = ImageDraw.Draw(cropped)
+        cx, cy = width // 2, height // 2
+        draw.ellipse([cx - 10, cy - 25, cx + 10, cy - 5], fill=(220, 38, 38), outline=(255, 255, 255), width=2)
+        draw.polygon([(cx - 8, cy - 10), (cx + 8, cy - 10), (cx, cy)], fill=(220, 38, 38))
+        draw.ellipse([cx - 4, cy - 18, cx + 4, cy - 12], fill=(255, 255, 255))
+
+        cropped.save(output_path)
+        return output_path
+    except Exception:
+        return None
 
 def get_proportional_image(path, max_w, max_h):
-    """Redimensiona mantendo a proporção original sem distorcer a foto."""
+    """Ajusta orientacao EXIF da foto e redimensiona sem distorcer."""
     try:
         with PILImage.open(path) as img:
+            # Corrige a rotacao automatica de fotos do celular
+            img = ImageOps.exif_transpose(img)
+            img.save(path)
             w, h = img.size
+
         ratio = min(max_w / w, max_h / h)
         return RLImage(path, width=w * ratio, height=h * ratio)
     except Exception:
@@ -141,7 +172,7 @@ async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     map_path = f"mapa_{update.effective_user.id}.png"
     lat, lon = context.user_data['lat'], context.user_data['lon']
     
-    saved_map = download_static_map(lat, lon, map_path)
+    saved_map = generate_osm_map(lat, lon, map_path)
     context.user_data['map_path'] = saved_map
 
     pdf_path = generate_pdf(update, context)
@@ -207,14 +238,14 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         
     story.append(Spacer(1, 15))
     
-    # Imagens Proporcionais
+    # Fotos e Mapa Proporcionais
     story.append(Paragraph("<b>COMPROVANTE (FOTO E LOCALIZAÇÃO)</b>", subtitle_style))
     story.append(Spacer(1, 8))
     
-    img_foto = get_proportional_image(context.user_data['photo_path'], max_w=240, max_h=180)
+    img_foto = get_proportional_image(context.user_data['photo_path'], max_w=240, max_h=220)
     
     if context.user_data.get('map_path') and os.path.exists(context.user_data['map_path']):
-        img_mapa = get_proportional_image(context.user_data['map_path'], max_w=240, max_h=180)
+        img_mapa = get_proportional_image(context.user_data['map_path'], max_w=240, max_h=220)
     else:
         img_mapa = Paragraph("<i>Mapa indisponível</i>", normal_style)
     
