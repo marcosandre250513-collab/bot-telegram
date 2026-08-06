@@ -61,35 +61,37 @@ async def get_localizacao(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data['lat'] = loc.latitude
     context.user_data['lon'] = loc.longitude
     
-    context.user_data['current_question'] = 0
     reply_keyboard = [['SIM', 'NÃO']]
     
-    await update.message.reply_text(
-        QUESTIONS[0],
+    # Pergunta geral para confirmar todos de uma vez
+    msg = (
+        "<b>CHECKLIST DE SEGURANÇA APR:</b>\n\n"
+        "1. Possuo equipamentos e ferramentas em condições de segurança?\n"
+        "2. Veículo estacionado em local seguro?\n"
+        "3. Local desobstruído e sem risco de queda?\n"
+        "4. Local livre de insetos ou animais agressivos?\n"
+        "5. Caixa do medidor verificada sem fuga de tensão elétrica?\n"
+        "6. É possível executar a atividade com segurança?\n\n"
+        "<b>Confirma SIM para todos os itens acima?</b>"
+    )
+    
+    await update.message.reply_html(
+        msg,
         reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
     return PERGUNTAS
 
 async def get_perguntas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    ans = update.message.text
-    context.user_data['answers'].append(ans)
+    ans = update.message.text.upper()
     
-    q_index = context.user_data['current_question'] + 1
-    context.user_data['current_question'] = q_index
+    # Preenche todas as respostas com a opção escolhida (SIM ou NÃO)
+    context.user_data['answers'] = [ans] * len(QUESTIONS)
     
-    if q_index < len(QUESTIONS):
-        reply_keyboard = [['SIM', 'NÃO']]
-        await update.message.reply_text(
-            QUESTIONS[q_index],
-            reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True, resize_keyboard=True)
-        )
-        return PERGUNTAS
-    else:
-        await update.message.reply_text(
-            "Checklist concluído com sucesso!\n\nAgora, envie uma FOTO/SELFIE do local do serviço para finalizar.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return FOTO
+    await update.message.reply_text(
+        "Checklist registrado com sucesso!\n\nAgora, envie uma FOTO/SELFIE do local do serviço para finalizar.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return FOTO
 
 async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     photo_file = await update.message.photo[-1].get_file()
@@ -101,10 +103,12 @@ async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     
     await update.message.reply_text("Gerando o comprovante em PDF com o mapa e foto...")
     
-    # Baixar mapa estilo OpenStreetMap / Google limpo com marcador
+    # Baixar mapa via Geoapify / CartoDB estático com marcador
     map_path = f"mapa_{update.effective_user.id}.png"
     lat, lon = context.user_data['lat'], context.user_data['lon']
-    map_url = f"https://staticmap.openstreetmap.de/staticmap.php?center={lat},{lon}&zoom=16&size=400x300&markers={lat},{lon},ol-marker-red"
+    
+    # URL do gerador de mapa estável e limpo
+    map_url = f"https://maps.geoapify.com/v1/staticmap?style=osm-bright&width=400&height=300&center=lonlat:{lon},{lat}&zoom=16&marker=lonlat:{lon},{lat};color:%23ff0000;size:medium&apiKey=c518b0e8c07e4c70a1a0f9b0c201d4a0"
     
     try:
         req = urllib.request.Request(map_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -112,7 +116,15 @@ async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             out.write(resp.read())
         context.user_data['map_path'] = map_path
     except Exception:
-        context.user_data['map_path'] = None
+        # Fallback de mapa secundário caso a API principal oscile
+        try:
+            map_url_alt = f"https://static-maps.yandex.ru/1.x/?lang=pt_BR&ll={lon},{lat}&z=16&l=map&pt={lon},{lat},pm2rdm&size=400,300"
+            req = urllib.request.Request(map_url_alt, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req) as resp, open(map_path, 'wb') as out:
+                out.write(resp.read())
+            context.user_data['map_path'] = map_path
+        except Exception:
+            context.user_data['map_path'] = None
 
     pdf_path = generate_pdf(update, context)
     
