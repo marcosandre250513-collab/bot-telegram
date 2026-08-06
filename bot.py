@@ -2,8 +2,9 @@ import hashlib
 import os
 import socket
 import uuid
+import urllib.request
 from datetime import datetime, timezone
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -20,7 +21,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 # Definindo os estados da conversa
 MATRICULA, MEDIDOR, LOCALIZACAO, PERGUNTAS, FOTO = range(5)
 
-# Lista de perguntas do checklist APR do seu modelo
+# Lista de perguntas do checklist APR
 QUESTIONS = [
     "1. Eu possuo todos os equipamentos de segurança necessários e ferramentas em condições para realização da atividade com segurança?",
     "2. Meu veículo está estacionado em condições seguras?",
@@ -36,7 +37,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['id_apr'] = uuid.uuid4().hex[:8].upper()
     context.user_data['answers'] = []
     
-    await update.message.reply_text("Iniciando emissão da APR.\nPor favor, informe a sua MATRÍCULA:")
+    await update.message.reply_text("Iniciando emissão da Análise Prévia de Risco (APR).\n\nPor favor, informe a sua MATRÍCULA:")
     return MATRICULA
 
 async def get_matricula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -46,8 +47,14 @@ async def get_matricula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def get_medidor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['medidor'] = update.message.text
+    
+    # Teclado especial para envio rápido de localização
+    button = KeyboardButton(text="📍 Enviar minha localização atual", request_location=True)
+    keyboard = ReplyKeyboardMarkup([[button]], one_time_keyboard=True, resize_keyboard=True)
+    
     await update.message.reply_text(
-        "Por favor, envie sua LOCALIZAÇÃO atual no Telegram (use o ícone de clipe > Localização):"
+        "Por favor, clique no botão abaixo para enviar sua localização atual:",
+        reply_markup=keyboard
     )
     return LOCALIZACAO
 
@@ -81,7 +88,7 @@ async def get_perguntas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return PERGUNTAS
     else:
         await update.message.reply_text(
-            "Checklist concluído! Por favor, tire uma SELFIE/FOTO do local para finalizar.",
+            "Checklist concluído com sucesso!\n\nAgora, envie uma FOTO/SELFIE do local do serviço para finalizar.",
             reply_markup=ReplyKeyboardRemove()
         )
         return FOTO
@@ -94,36 +101,52 @@ async def get_foto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['photo_path'] = photo_path
     context.user_data['termino'] = datetime.now()
     
-    await update.message.reply_text("Gerando relatório PDF...")
+    await update.message.reply_text("Gerando o comprovante em PDF com o mapa e foto...")
     
+    # Baixar mapa estático
+    map_path = f"mapa_{update.effective_user.id}.png"
+    lat, lon = context.user_data['lat'], context.user_data['lon']
+    map_url = f"https://static-maps.yandex.ru/1.x/?lang=pt_BR&ll={lon},{lat}&z=16&l=map&pt={lon},{lat},pm2rdm&size=300,200"
+    
+    try:
+        req = urllib.request.Request(map_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as resp, open(map_path, 'wb') as out:
+            out.write(resp.read())
+        context.user_data['map_path'] = map_path
+    except Exception as e:
+        context.user_data['map_path'] = None
+
     pdf_path = generate_pdf(update, context)
     
+    medidor_num = context.user_data.get('medidor', 'APR')
     with open(pdf_path, 'rb') as pdf:
         await update.message.reply_document(
             document=pdf,
-            filename=f"APR_{context.user_data['id_apr']}.pdf",
-            caption="Relatório APR gerado com sucesso!"
+            filename=f"APR_Medidor_{medidor_num}.pdf",
+            caption=f"📋 *Relatório APR Concluído*\nMedidor: {medidor_num}\nID: {context.user_data['id_apr']}",
+            parse_mode="Markdown"
         )
         
-    if os.path.exists(photo_path):
-        os.remove(photo_path)
-    if os.path.exists(pdf_path):
-        os.remove(pdf_path)
+    # Limpeza de arquivos temporários
+    for path in [photo_path, map_path, pdf_path]:
+        if path and os.path.exists(path):
+            os.remove(path)
         
     return ConversationHandler.END
 
 def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    pdf_filename = f"APR_Report_{context.user_data['id_apr']}.pdf"
+    medidor_num = context.user_data.get('medidor', '')
+    pdf_filename = f"APR_Medidor_{medidor_num}.pdf"
     doc = SimpleDocTemplate(pdf_filename, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     story = []
     
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=16, leading=18, textColor=colors.HexColor('#1A365D'))
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=15, leading=18, textColor=colors.HexColor('#1A365D'))
     subtitle_style = ParagraphStyle('Subtitle', parent=styles['Heading2'], fontSize=12, leading=14, textColor=colors.HexColor('#2B6CB0'))
     normal_style = styles['Normal']
     
-    # Cabeçalho
-    story.append(Paragraph("<b>SMART APR FORENSIC REPORT</b>", title_style))
+    # Título do PDF com número do medidor (Substituiu o SMART APR FORENSIC REPORT)
+    story.append(Paragraph(f"<b>RELATÓRIO DE APR - MEDIDOR: {medidor_num}</b>", title_style))
     story.append(Spacer(1, 10))
     
     # Cálculo de hashes para integridade
@@ -133,16 +156,16 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     raw_data = f"{context.user_data['id_apr']}{context.user_data['matricula']}{context.user_data['lat']}{context.user_data['lon']}"
     hash_apr = hashlib.sha256(raw_data.encode()).hexdigest()
     
-    # Tabela de Identificação
+    # Tabela de Dados Gerais
     info_data = [
         ["ID APR:", context.user_data['id_apr'], "LATITUDE:", str(context.user_data['lat'])],
         ["MATRÍCULA:", context.user_data['matricula'], "LONGITUDE:", str(context.user_data['lon'])],
         ["MEDIDOR:", context.user_data['medidor'], "TELEGRAM ID:", str(update.effective_user.id)],
-        ["INÍCIO:", context.user_data['inicio'].strftime('%d/%m/%Y %H:%M'), "HOSTNAME:", socket.gethostname()],
-        ["TÉRMINO:", context.user_data['termino'].strftime('%d/%m/%Y %H:%M'), "UTC:", datetime.now(timezone.utc).isoformat()]
+        ["INÍCIO:", context.user_data['inicio'].strftime('%d/%m/%Y %H:%M'), "COMPUTADOR:", socket.gethostname()],
+        ["TÉRMINO:", context.user_data['termino'].strftime('%d/%m/%Y %H:%M'), "HORÁRIO UTC:", datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')]
     ]
     
-    t_info = Table(info_data, colWidths=[100, 150, 100, 180])
+    t_info = Table(info_data, colWidths=[90, 160, 90, 190])
     t_info.setStyle(TableStyle([
         ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
         ('FONTSIZE', (0,0), (-1,-1), 9),
@@ -151,32 +174,45 @@ def generate_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
     story.append(t_info)
-    story.append(Spacer(1, 15))
+    story.append(Spacer(1, 12))
     
-    # Checklist
-    story.append(Paragraph("<b>CHECKLIST APR</b>", subtitle_style))
+    # Checklist APR
+    story.append(Paragraph("<b>CHECKLIST DE SEGURANÇA (APR)</b>", subtitle_style))
     story.append(Spacer(1, 5))
     
     for q, a in zip(QUESTIONS, context.user_data['answers']):
         story.append(Paragraph(f"<b>{q}</b>", normal_style))
         story.append(Paragraph(f"Resposta: <b>{a}</b>", normal_style))
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 3))
         
     story.append(Spacer(1, 10))
     
-    # Integridade Forense
-    story.append(Paragraph("<b>INTEGRIDADE FORENSE</b>", subtitle_style))
+    # Integridade Forense / Registro Digital
+    story.append(Paragraph("<b>REGISTRO DE INTEGRIDADE DIGITAL</b>", subtitle_style))
     story.append(Paragraph(f"<b>HASH SHA256 APR:</b><br/>{hash_apr}", normal_style))
     story.append(Paragraph(f"<b>HASH FOTO FINAL:</b><br/>{hash_foto}", normal_style))
     story.append(Spacer(1, 15))
     
-    # Anexo Foto
-    if os.path.exists(context.user_data['photo_path']):
-        story.append(Paragraph("<b>COMPROVANTE / FOTO REGISTRADA</b>", subtitle_style))
-        story.append(Spacer(1, 5))
-        img = Image(context.user_data['photo_path'], width=200, height=150)
-        story.append(img)
-        
+    # Fotos e Mapa Lado a Lado
+    story.append(Paragraph("<b>COMPROVANTES DE REGISTRO (FOTO E LOCALIZAÇÃO)</b>", subtitle_style))
+    story.append(Spacer(1, 8))
+    
+    img_foto = Image(context.user_data['photo_path'], width=230, height=170)
+    
+    if context.user_data.get('map_path') and os.path.exists(context.user_data['map_path']):
+        img_mapa = Image(context.user_data['map_path'], width=230, height=170)
+    else:
+        img_mapa = Paragraph("<i>Mapa indisponível</i>", normal_style)
+    
+    media_table = Table([[img_foto, img_mapa]], colWidths=[260, 260])
+    media_table.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
+    
+    story.append(media_table)
     doc.build(story)
     return pdf_filename
 
