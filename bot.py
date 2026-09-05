@@ -30,7 +30,7 @@ t = Thread(target=run)
 t.start()
 # --------------------------------
 
-TOKEN = 'SEU_TOKEN_AQUI'
+TOKEN = '8804109455:AAHWQ08gSyMHytDkmBF8qVr5Ia-HC1_5x_Q'
 bot = telebot.TeleBot(TOKEN)
 
 PESO_SERVICO = 13.64
