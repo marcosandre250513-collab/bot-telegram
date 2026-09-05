@@ -40,7 +40,7 @@ t = Thread(target=run)
 t.start()
 
 # --- CONFIGURAÇÃO DO BOT E BANCO POSTGRESQL ---
-TOKEN = '8804109455:AAEW-Ofgrd0C9WrRWApDGd12rxz2oOHLhMc'
+TOKEN = '8804109455:AAHPqPuDSp2cB_VANRG4EsJOevrw9sydRf8'
 bot = telebot.TeleBot(TOKEN)
 
 PESO_SERVICO = 13.64
@@ -351,6 +351,29 @@ def relatorio_mensal(message):
     bot.send_message(message.chat.id, texto, parse_mode="Markdown")
 
 # ==========================================
+# ZERAR HISTÓRICO MENSAL (COM CONFIRMAÇÃO)
+# ==========================================
+@bot.message_handler(commands=['zerar_mensal', 'resetarmensal'])
+def solicitar_zerar_mensal(message):
+    str_id = str(message.from_user.id)
+    inicializar_agente(str_id, message.from_user.first_name)
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("⚠️ SIM, ZERAR MENSAL", callback_data="confirm_zerar_mensal"),
+        types.InlineKeyboardButton("❌ CANCELAR", callback_data="cancel_zerar_mensal")
+    )
+    
+    bot.reply_to(
+        message, 
+        "🚨 *ATENÇÃO: EXCLUSÃO DO HISTÓRICO MENSAL*\n\n"
+        "Esta ação irá **apagar permanentemente todos os registros do histórico mensal** salvos no banco de dados PostgreSQL.\n\n"
+        "Tem certeza absoluta de que deseja zerar seu histórico mensal?", 
+        parse_mode="Markdown", 
+        reply_markup=markup
+    )
+
+# ==========================================
 # HANDLERS DE COMANDOS E AJUDA
 # ==========================================
 @bot.message_handler(commands=['comandos', 'ajuda', 'help'])
@@ -362,7 +385,8 @@ def listar_comandos(message):
         "• `/relatorio` ou `/prod` - Exibe a parcial da semana atual\n"
         "• `/mensal` ou `/historico` - Consulta total acumulado de meses passados\n"
         "• `/comandos` - Exibe esta lista de comandos\n"
-        "• `/resetar` - Zera a contagem da semana atual\n\n"
+        "• `/resetar` - Zera a contagem da semana atual\n"
+        "• `/zerar_mensal` - Zera todo o histórico mensal acumulado\n\n"
         "⚡ *Lançamentos Diretos por Texto:*\n"
         "• `/corte [qnt]` - Registra cortes (Ex: `/corte 10`)\n"
         "• `/rel [qnt]` - Registra religações (Ex: `/rel 5`)\n"
@@ -623,15 +647,49 @@ def callback_handler(call):
                               chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Cancelado!")
 
-# --- INICIALIZAÇÃO DO BANCO E DO BOT ---
+    elif call.data == 'confirm_zerar_mensal':
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM lancamentos WHERE user_id = %s;", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        bot.edit_message_text(
+            "🗑️ *HISTÓRICO MENSAL ZERADO COM SUCESSO!*\n\n"
+            "Todos os lançamentos acumulados foram permanentemente removidos. "
+            "Seu relatório em `/mensal` agora começará limpo.", 
+            chat_id=call.message.chat.id, 
+            message_id=call.message.message_id, 
+            parse_mode="Markdown"
+        )
+        bot.answer_callback_query(call.id, "Histórico mensal zerado!", show_alert=True)
+
+    elif call.data == 'cancel_zerar_mensal':
+        bot.edit_message_text(
+            "❌ *OPERAÇÃO CANCELADA.*\n"
+            "Seu histórico mensal permanece intacto no banco de dados.", 
+            chat_id=call.message.chat.id, 
+            message_id=call.message.message_id, 
+            parse_mode="Markdown"
+        )
+        bot.answer_callback_query(call.id, "Cancelado!")
+
+# --- INICIALIZAÇÃO DO BANCO E DO BOT (COM TRATAMENTO DE CONFLITO) ---
 print("Inicializando tabelas do PostgreSQL...")
 init_db()
 
 try:
-    bot.remove_webhook()
-    time.sleep(1)
+    bot.delete_webhook(drop_pending_updates=True)
+    time.sleep(2)
 except Exception as e:
     print(f"Aviso ao limpar webhook: {e}")
 
 print("Sistema Global Online no PostgreSQL. Aguardando conexão...")
-bot.infinity_polling(skip_pending=True)
+
+while True:
+    try:
+        bot.infinity_polling(skip_pending=True, timeout=20)
+    except Exception as e:
+        print(f"Erro de conexão ({e}). Tentando reconectar em 5 segundos...")
+        time.sleep(5)
