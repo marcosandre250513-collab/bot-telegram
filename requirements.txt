@@ -1,5 +1,4 @@
-​pyTelegramBotAPI
-​Flask
-​matplotlib
-​pillow
-​reportlab
+pyTelegramBotAPI
+flask
+pillow
+reportlab
