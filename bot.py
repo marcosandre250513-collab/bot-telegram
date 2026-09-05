@@ -13,10 +13,8 @@ import psycopg2
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
 
 def agora_sp():
-    """Retorna a data e hora atual no fuso oficial de São Paulo (UTC-3)."""
     return datetime.now(FUSO_SP)
 
-# --- MAPA DE MESES EM PORTUGUÊS ---
 MESES_NOME = {
     1: 'JANEIRO', 2: 'FEVEREIRO', 3: 'MARÇO', 4: 'ABRIL',
     5: 'MAIO', 6: 'JUNHO', 7: 'JULHO', 8: 'AGOSTO',
@@ -28,7 +26,7 @@ DIAS_SEMANA = {
     3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
 }
 
-# --- CONFIGURAÇÃO DO SERVIDOR WEB ---
+# --- SERVIDOR WEB PARA MANTER O BOT ATIVO ---
 app = Flask('')
 
 @app.route('/')
@@ -109,24 +107,20 @@ def processar_lancamento(user_id, tipo_id, quantidade, dia_especifico=None):
     conn.close()
 
 def converter_reaviso_para_maos(user_id, quantidade=1):
-    """Converte a quantidade de reavisos comuns/outros para entregues em mãos."""
     str_id = str(user_id)
     agora = agora_sp()
     dia_nome = DIAS_SEMANA.get(agora.weekday(), 'SAB')
     
     conn = get_db_connection()
     cur = conn.cursor()
-    
     cur.execute('''
         INSERT INTO lancamentos (user_id, data_registro, dia_semana, tipo, quantidade, semana_ativa)
         VALUES (%s, %s, %s, 'reaviso_maos', %s, TRUE)
     ''', (str_id, agora, dia_nome, quantidade))
-    
     cur.execute('''
         INSERT INTO lancamentos (user_id, data_registro, dia_semana, tipo, quantidade, semana_ativa)
         VALUES (%s, %s, %s, 'reaviso_outros', %s, TRUE)
     ''', (str_id, agora, dia_nome, -quantidade))
-    
     conn.commit()
     cur.close()
     conn.close()
@@ -174,25 +168,51 @@ def obter_resumo_semana(user_id):
     conn.close()
     return totais, producao_diaria
 
+def obter_historico_mensal(user_id):
+    str_id = str(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute('''
+        SELECT 
+            TO_CHAR(data_registro, 'YYYY-MM') AS mes_ano,
+            SUM(CASE WHEN tipo IN ('corte', 'religacao') THEN quantidade ELSE 0 END) AS cr,
+            SUM(CASE WHEN tipo LIKE 'reaviso%%' THEN quantidade ELSE 0 END) AS rv,
+            SUM(CASE WHEN tipo = 'improdutivo' THEN quantidade ELSE 0 END) AS imp,
+            SUM(CASE WHEN tipo = 'negociacao' THEN quantidade ELSE 0 END) AS neg
+        FROM lancamentos
+        WHERE user_id = %s
+        GROUP BY TO_CHAR(data_registro, 'YYYY-MM')
+        ORDER BY mes_ano DESC;
+    ''', (str_id,))
+    
+    resumo_meses = cur.fetchall()
+    cur.close()
+    conn.close()
+    return resumo_meses
+
 # ==========================================
-# MENUS E TECLADOS INTERATIVOS (FIXO)
+# MENUS E TECLADOS INTERATIVOS
 # ==========================================
 def menu_principal_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
+    btn_mensal = types.KeyboardButton('📅 Histórico Mensal')
     btn_registrar = types.KeyboardButton('⚡ Registrar Produção')
     btn_comandos = types.KeyboardButton('📜 Lista de Comandos')
     btn_reset_semana = types.KeyboardButton('🔄 Resetar Semana')
     
-    markup.add(btn_relatorio, btn_registrar)
-    markup.add(btn_comandos, btn_reset_semana)
+    markup.add(btn_relatorio, btn_mensal)
+    markup.add(btn_registrar, btn_comandos)
+    markup.add(btn_reset_semana)
     return markup
 
 def teclado_registro_rapido():
-    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup = types.InlineKeyboardMarkup(row_width=3)
     markup.add(
         types.InlineKeyboardButton("🔌 Religue +1", callback_data="add_religacao_1"),
-        types.InlineKeyboardButton("✋ +1 em Mãos", callback_data="convert_maos_1")
+        types.InlineKeyboardButton("✋ +1 em Mãos", callback_data="convert_maos_1"),
+        types.InlineKeyboardButton("🚫 Imp +1", callback_data="add_improdutivo_1")
     )
     markup.add(
         types.InlineKeyboardButton("✂️ Corte (Digitar Qnt)", callback_data="prompt_corte"),
@@ -225,8 +245,7 @@ def teclado_confirmacao_zerar():
 def receber_qnt_corte(message):
     try:
         qnt = int(message.text)
-        user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'corte', qnt)
+        processar_lancamento(message.from_user.id, 'corte', qnt)
         bot.reply_to(message, f"✅ *+ {qnt} Corte(s)* adicionado(s) com sucesso!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
@@ -234,8 +253,7 @@ def receber_qnt_corte(message):
 def receber_qnt_religacao(message):
     try:
         qnt = int(message.text)
-        user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'religacao', qnt)
+        processar_lancamento(message.from_user.id, 'religacao', qnt)
         bot.reply_to(message, f"✅ *+ {qnt} Religação(ões)* adicionada(s) com sucesso!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
@@ -243,8 +261,7 @@ def receber_qnt_religacao(message):
 def receber_qnt_reaviso_outros(message):
     try:
         qnt = int(message.text)
-        user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'reaviso_outros', qnt)
+        processar_lancamento(message.from_user.id, 'reaviso_outros', qnt)
         bot.reply_to(message, f"✅ *+ {qnt} Reaviso(s)* adicionado(s) à sua carga!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
@@ -255,8 +272,7 @@ def receber_qnt_reaviso_outros(message):
 @bot.message_handler(commands=['maos'])
 def converter_maos_manual(message):
     str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
+    inicializar_agente(str_id, message.from_user.first_name)
     try:
         partes = message.text.split()
         qnt = int(partes[1]) if len(partes) > 1 else 1
@@ -268,49 +284,71 @@ def converter_maos_manual(message):
 @bot.message_handler(commands=['addcorte', 'cortedia'])
 def add_corte_dia_especifico(message):
     str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
-
+    inicializar_agente(str_id, message.from_user.first_name)
     try:
         partes = message.text.split()
         if len(partes) < 3:
-            return bot.reply_to(
-                message, 
-                "⚠️ *SINTAXE INCORRETA*\nUse: `/addcorte [dia] [qnt]`\nEx: `/addcorte seg 10`",
-                parse_mode="Markdown"
-            )
+            return bot.reply_to(message, "⚠️ *SINTAXE INCORRETA*\nUse: `/addcorte [dia] [qnt]`", parse_mode="Markdown")
 
         dia_input = partes[1].upper().strip()
         quantidade = int(partes[2])
 
         mapa_dias = {
-            'SEG': 'SEG', 'SEGUNDA': 'SEG',
-            'TER': 'TERCA', 'TERCA': 'TERCA',
-            'QUA': 'QUARTA', 'QUARTA': 'QUARTA',
-            'QUI': 'QUINTA', 'QUINTA': 'QUINTA',
-            'SEX': 'SEXTA', 'SEXTA': 'SEXTA',
-            'SAB': 'SAB', 'SABADO': 'SAB'
+            'SEG': 'SEG', 'SEGUNDA': 'SEG', 'TER': 'TERCA', 'TERCA': 'TERCA',
+            'QUA': 'QUARTA', 'QUARTA': 'QUARTA', 'QUI': 'QUINTA', 'QUINTA': 'QUINTA',
+            'SEX': 'SEXTA', 'SEXTA': 'SEXTA', 'SAB': 'SAB', 'SABADO': 'SAB'
         }
 
         if dia_input not in mapa_dias:
-            return bot.reply_to(
-                message, 
-                "⚠️ *DIA INVÁLIDO*\nDias válidos: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`", 
-                parse_mode="Markdown"
-            )
+            return bot.reply_to(message, "⚠️ *DIA INVÁLIDO*\nDias: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`", parse_mode="Markdown")
 
         dia_chave = mapa_dias[dia_input]
         processar_lancamento(str_id, 'corte', quantidade, dia_especifico=dia_chave)
-        
-        bot.reply_to(
-            message, 
-            f"🤫 *AJUSTE MANUAL REALIZADO*\n+{quantidade} Corte(s) adicionados em *{dia_chave}* com sucesso!", 
-            parse_mode="Markdown"
-        )
-    except ValueError:
-        bot.reply_to(message, "⚠️ A quantidade deve ser um número inteiro.", parse_mode="Markdown")
+        bot.reply_to(message, f"🤫 *AJUSTE MANUAL REALIZADO*\n+{quantidade} Corte(s) em *{dia_chave}*", parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, f"⚠️ Erro ao processar: {str(e)}", parse_mode="Markdown")
+
+# ==========================================
+# HISTÓRICO MENSAL
+# ==========================================
+@bot.message_handler(func=lambda m: m.text == '📅 Histórico Mensal' or m.text in ['/mensal', '/meses', '/historico'])
+def relatorio_mensal(message):
+    str_id = str(message.from_user.id)
+    nome = message.from_user.first_name
+    inicializar_agente(str_id, nome)
+    
+    dados_meses = obter_historico_mensal(str_id)
+    
+    if not dados_meses:
+        return bot.reply_to(message, "📂 *Nenhum histórico mensal encontrado no banco ainda.*", parse_mode="Markdown")
+    
+    texto = f"📅 *HISTÓRICO MENSAL DE PRODUÇÃO*\n👤 Agente: *{nome.upper()}*\n\n"
+    
+    for row in dados_meses:
+        mes_ano_str, cr, rv, imp, neg = row
+        ano, mes = mes_ano_str.split('-')
+        nome_mes = MESES_NOME.get(int(mes), mes)
+        
+        mes_pag_num = int(mes) + 2
+        ano_pag = int(ano)
+        if mes_pag_num > 12:
+            mes_pag_num -= 12
+            ano_pag += 1
+        nome_mes_pag = MESES_NOME.get(mes_pag_num, str(mes_pag_num))
+        
+        pts_est = (cr * PESO_SERVICO) + (rv * PESO_REAVISO)
+        
+        texto += (
+            f"🗓️ *{nome_mes} / {ano}*\n"
+            f"• Cortes / Religações: *{cr}*\n"
+            f"• Reavisos Atendidos: *{rv}*\n"
+            f"• Improdutivos (Visitas): *{imp}*\n"
+            f"• Pontuação Total Acumulada: *{pts_est:.2f} pts*\n"
+            f"💰 *Pagamento Previsto Em:* *{nome_mes_pag} / {ano_pag}*\n"
+            f"----------------------------------------\n"
+        )
+    
+    bot.send_message(message.chat.id, texto, parse_mode="Markdown")
 
 # ==========================================
 # HANDLERS DE COMANDOS E AJUDA
@@ -320,17 +358,17 @@ def add_corte_dia_especifico(message):
 def listar_comandos(message):
     texto = (
         "📜 *LISTA DE COMANDOS DO BOT*\n\n"
-        "📊 *Relatórios e Geral:*\n"
-        "• `/relatorio` ou `/prod` - Exibe o relatório de bonificação\n"
+        "📊 *Relatórios e Histórico:*\n"
+        "• `/relatorio` ou `/prod` - Exibe a parcial da semana atual\n"
+        "• `/mensal` ou `/historico` - Consulta total acumulado de meses passados\n"
         "• `/comandos` - Exibe esta lista de comandos\n"
-        "• `/resetar` - Zera a contagem da semana atual\n"
-        "• `/zerar_historico` - Apaga o histórico permanente\n\n"
+        "• `/resetar` - Zera a contagem da semana atual\n\n"
         "⚡ *Lançamentos Diretos por Texto:*\n"
         "• `/corte [qnt]` - Registra cortes (Ex: `/corte 10`)\n"
         "• `/rel [qnt]` - Registra religações (Ex: `/rel 5`)\n"
         "• `/rea [qnt]` - Registra carga de reavisos (Ex: `/rea 30`)\n"
-        "• `/maos [qnt]` - Converte reavisos para em mãos (Ex: `/maos 1` ou `/maos 5`)\n"
-        "• `/imp [qnt]` - Registra improdutivos/entregas (Ex: `/imp 2`)\n\n"
+        "• `/imp [qnt]` - Registra improdutivos (Ex: `/imp 2`)\n"
+        "• `/maos [qnt]` - Converte reavisos para em mãos (Ex: `/maos 1` ou `/maos 5`)\n\n"
         "⚙️ *Ajustes Específicos:*\n"
         "• `/addcorte [dia] [qnt]` - Adiciona cortes em dia específico (Ex: `/addcorte seg 10`)"
     )
@@ -354,7 +392,7 @@ def menu_registro(message):
                  parse_mode="Markdown", reply_markup=teclado_registro_rapido())
 
 # ==========================================
-# RELATÓRIO FORMATADO COM MÊS DE PAGAMENTO
+# RELATÓRIO FORMATADO SEMANAL
 # ==========================================
 @bot.message_handler(func=lambda m: m.text == '📊 Relatório Semanal' or m.text in ['/relatorio', '/status', '/prod', '/dds'])
 def relatorio(message):
@@ -423,15 +461,14 @@ def relatorio(message):
     bonif_str = f"{bonificacao:,.2f}".replace('.', ',')
     msg_bonif = (
         f"👋 Olá {nome.upper()}, segue abaixo a sua parcial da bonificação semanal:\n\n"
-        f"📅 Semana 1 ({data_inicio} a {data_fim}):\n"
+        f"📅 Semana ({data_inicio} a {data_fim}):\n"
         f"• Cortes/Religações: {cr}\n"
         f"• Reavisos: {detalhe_reaviso}\n"
-        f"• Entregas: {en}\n"
+        f"• Entregas / Improdutivos: {en}\n"
         f"• Negociações: {ng}\n"
         f"• Faixa: {faixa_str}\n"
         f"• {falta_str}\n"
         f"💰 Bonificação parcial: R$ {bonif_str}\n\n"
-        f"🏆 Total da bonificação até agora: R$ {bonif_str}\n\n"
         f"🗓️ *MÊS DE PAGAMENTO DESTA PRODUÇÃO:*\n"
         f"➡️ *{nome_mes_pagamento}*"
     )
@@ -459,7 +496,7 @@ def relatorio(message):
         "📌 *Legenda:*\n"
         "CR = Cortes/Religações\n"
         "RV = Reavisos Total\n"
-        "EN = Entregas\n"
+        "EN = Entregas/Improdutivos\n"
         "NG = Negociações\n\n"
         "```\n"
         "Data       | CR | RV | EN | NG\n"
@@ -474,8 +511,7 @@ def relatorio(message):
 @bot.message_handler(commands=['corte', 'rel', 'rea', 'imp', 'religacao', 'improdutivo'])
 def registrar_servico_manual(message):
     str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
+    inicializar_agente(str_id, message.from_user.first_name)
     
     comando = message.text.split()[0].lower()
     
@@ -549,6 +585,10 @@ def callback_handler(call):
         converter_reaviso_para_maos(user_id, 1)
         bot.answer_callback_query(call.id, "✋ +1 Reaviso ajustado para EM MÃOS!", show_alert=True)
 
+    elif call.data == 'add_improdutivo_1':
+        processar_lancamento(user_id, 'improdutivo', 1)
+        bot.answer_callback_query(call.id, "🚫 +1 Improdutivo Registrado!", show_alert=True)
+
     elif call.data == 'confirm_reset_semana':
         conn = get_db_connection()
         cur = conn.cursor()
@@ -587,7 +627,6 @@ def callback_handler(call):
 print("Inicializando tabelas do PostgreSQL...")
 init_db()
 
-print("Limpando conexões anteriores e inicializando...")
 try:
     bot.remove_webhook()
     time.sleep(1)
