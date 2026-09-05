@@ -11,10 +11,9 @@ import os
 FUSO_SP = timezone(timedelta(hours=-3))
 
 def agora_sp():
-    """Retorna a data e hora atual no fuso oficial de São Paulo (UTC-3)."""
     return datetime.now(FUSO_SP)
 
-# --- CONFIGURAÇÃO DO SERVIDOR PARA O RAILWAY ---
+# --- SERVIDOR FLASK PARA MANTER O BOT ONLINE (RAILWAY) ---
 app = Flask('')
 
 @app.route('/')
@@ -26,8 +25,8 @@ def run():
 
 t = Thread(target=run)
 t.start()
-# --------------------------------
 
+# --- CONFIGURAÇÃO DO BOT ---
 TOKEN = os.getenv('BOT_TOKEN', '8804109455:AAHeMGTy2A12ePXD3fjS_n_MST8oVY7oN8k')
 bot = telebot.TeleBot(TOKEN)
 
@@ -40,7 +39,7 @@ DIAS_SEMANA = {
     3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
 }
 
-# --- FUNÇÕES DE BANCO DE DADOS PERMANENTE ---
+# --- BANCO DE DADOS LOCAL ---
 def carregar_banco():
     if os.path.exists(ARQUIVO_BANCO):
         try:
@@ -70,28 +69,35 @@ def inicializar_agente(user_id, nome):
         salvar_banco(usuarios)
 
 # ==========================================
-# MENUS E TECLADOS INTERATIVOS
+# MENUS E TECLADOS OTIMIZADOS PARA A RUA
 # ==========================================
 def menu_principal_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
     btn_registrar = types.KeyboardButton('⚡ Registrar Produção')
     btn_reset_semana = types.KeyboardButton('🔄 Resetar Semana')
-    
     markup.add(btn_relatorio, btn_registrar)
     markup.add(btn_reset_semana)
     return markup
 
 def teclado_registro_rapido():
-    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    
+    # Linha de atalho rápido (+1 com aviso no meio da tela)
     markup.add(
-        types.InlineKeyboardButton("✂️ Corte (Pergunta Qnt)", callback_data="prompt_corte"),
-        types.InlineKeyboardButton("🔌 Religação (Pergunta Qnt)", callback_data="prompt_religacao")
+        types.InlineKeyboardButton("✂️ Corte +1", callback_data="add_corte_1"),
+        types.InlineKeyboardButton("🔌 Religue +1", callback_data="add_religacao_1"),
+        types.InlineKeyboardButton("📄 Reaviso +1", callback_data="add_reaviso_1")
     )
+    
+    # Linha para digitar quantidade específica
     markup.add(
-        types.InlineKeyboardButton("Corte +1", callback_data="add_corte_1"),
-        types.InlineKeyboardButton("Religue +1", callback_data="add_religacao_1")
+        types.InlineKeyboardButton("✂️ Corte (Vários)", callback_data="prompt_corte"),
+        types.InlineKeyboardButton("🔌 Religue (Vários)", callback_data="prompt_religacao"),
+        types.InlineKeyboardButton("📄 Reaviso (Vários)", callback_data="prompt_reaviso")
     )
+    
+    # Conversões para improdutivos
     markup.add(
         types.InlineKeyboardButton("🔄 Corte -> Improdutivo", callback_data="convert_corte_1"),
         types.InlineKeyboardButton("🔄 Religue -> Improdutivo", callback_data="convert_religacao_1")
@@ -115,7 +121,7 @@ def teclado_confirmacao_zerar():
     return markup
 
 # ==========================================
-# HANDLERS DE RESPOSTA (NEXT STEP HANDLERS)
+# HANDLERS DE ENTRADA DE TEXTO
 # ==========================================
 def receber_qnt_corte(message):
     try:
@@ -135,21 +141,37 @@ def receber_qnt_religacao(message):
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
+def receber_qnt_reaviso(message):
+    try:
+        qnt = int(message.text)
+        user_id = str(message.from_user.id)
+        processar_lancamento(user_id, 'reaviso', 'Reaviso', qnt)
+        bot.reply_to(message, f"✅ *+ {qnt} Reaviso(s)* adicionado(s) com sucesso!", parse_mode="Markdown")
+    except:
+        bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
+
 # ==========================================
-# COMANDO OCULTO: ADICIONAR CORTE EM DIA ESPECÍFICO
+# COMANDOS DE AJUSTE POR DIA (CORTE E REAVISO)
 # ==========================================
 @bot.message_handler(commands=['addcorte', 'cortedia'])
 def add_corte_dia_especifico(message):
     str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
+    inicializar_agente(str_id, message.from_user.first_name)
+    processar_ajuste_dia(message, str_id, 'corte', 'Corte')
 
+@bot.message_handler(commands=['addreaviso', 'reavisodia'])
+def add_reaviso_dia_especifico(message):
+    str_id = str(message.from_user.id)
+    inicializar_agente(str_id, message.from_user.first_name)
+    processar_ajuste_dia(message, str_id, 'reaviso', 'Reaviso')
+
+def processar_ajuste_dia(message, str_id, tipo_id, tipo_nome):
     try:
         partes = message.text.split()
         if len(partes) < 3:
             return bot.reply_to(
                 message, 
-                "⚠️ *SINTAXE INCORRETA*\nUse: `/addcorte [dia] [qnt]`\nEx: `/addcorte seg 10` ou `/addcorte terca 5`\n\nDias aceitos: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`",
+                f"⚠️ *SINTAXE INCORRETA*\nUse: `/{message.text.split()[0][1:]} [dia] [qnt]`\nEx: `/{message.text.split()[0][1:]} seg 10`\n\nDias: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`",
                 parse_mode="Markdown"
             )
 
@@ -166,38 +188,24 @@ def add_corte_dia_especifico(message):
         }
 
         if dia_input not in mapa_dias:
-            return bot.reply_to(
-                message, 
-                "⚠️ *DIA INVÁLIDO*\nDias válidos: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`", 
-                parse_mode="Markdown"
-            )
+            return bot.reply_to(message, "⚠️ *DIA INVÁLIDO*\nDias aceitos: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`", parse_mode="Markdown")
 
         dia_chave = mapa_dias[dia_input]
-        agora = agora_sp()
-        data_str = agora.strftime("%d/%m/%Y %H:%M")
+        data_str = agora_sp().strftime("%d/%m/%Y %H:%M")
 
-        usuarios[str_id]['producao_diaria'][dia_chave]['corte'] += quantidade
-        usuarios[str_id]['totais_semana']['corte'] += quantidade
+        usuarios[str_id]['producao_diaria'][dia_chave][tipo_id] += quantidade
+        usuarios[str_id]['totais_semana'][tipo_id] += quantidade
         usuarios[str_id]['historico_permanente'].append({
-            'data': data_str,
-            'dia': dia_chave,
-            'tipo': 'Corte',
-            'quantidade': quantidade
+            'data': data_str, 'dia': dia_chave, 'tipo': tipo_nome, 'quantidade': quantidade
         })
 
         salvar_banco(usuarios)
-        bot.reply_to(
-            message, 
-            f"🤫 *AJUSTE MANUAL REALIZADO*\n+{quantidade} Corte(s) adicionados em *{dia_chave}* com sucesso!", 
-            parse_mode="Markdown"
-        )
+        bot.reply_to(message, f"🤫 *AJUSTE REALIZADO*\n+{quantidade} {tipo_nome}(s) lançados em *{dia_chave}*!", parse_mode="Markdown")
     except ValueError:
         bot.reply_to(message, "⚠️ A quantidade deve ser um número inteiro.", parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"⚠️ Erro ao processar: {str(e)}", parse_mode="Markdown")
 
 # ==========================================
-# HANDLERS DE COMANDOS E TEXTO
+# MENUS E COMANDOS PRINCIPAIS
 # ==========================================
 @bot.message_handler(commands=['start', 'help'])
 def start(message):
@@ -207,20 +215,15 @@ def start(message):
     texto = (
         f"🌐 *SISTEMA DE PERFORMANCE DE CAMPO*\n"
         f"Bem-vindo(a), {nome}!\n\n"
-        "⚠️ *AVISO DE APOIO OPERACIONAL*\n"
-        "_Esta é uma ferramenta independente desenvolvida para auxílio no controle diário de produção e acompanhamento de metas._\n\n"
         "Selecione uma opção no menu abaixo para operar o sistema:"
     )
     bot.reply_to(message, texto, parse_mode="Markdown", reply_markup=menu_principal_keyboard())
 
 @bot.message_handler(func=lambda m: m.text == '⚡ Registrar Produção')
 def menu_registro(message):
-    bot.reply_to(message, "⚡ *REGISTRO RÁPIDO DE CAMPO*\nToque nos botões para lançar sua produção:", 
+    bot.reply_to(message, "⚡ *REGISTRO RÁPIDO DE CAMPO*\nToque em um botão para lançar:", 
                  parse_mode="Markdown", reply_markup=teclado_registro_rapido())
 
-# ==========================================
-# RELATÓRIO NO FORMATO DE TEXTO (MODELO DAS FOTOS)
-# ==========================================
 @bot.message_handler(func=lambda m: m.text == '📊 Relatório Semanal' or m.text in ['/relatorio', '/status'])
 def relatorio(message):
     str_id = str(message.from_user.id)
@@ -259,7 +262,7 @@ def relatorio(message):
         falta_pts = p_f2 - pontos_total
         faltam_cr = math.ceil(falta_pts / PESO_SERVICO)
         faltam_rv = math.ceil(falta_pts / PESO_REAVISO)
-        faltam_str = f"Faltaram {faltam_cr} Cortes ou {faltam_rv} Reavisos para Faixa 2"
+        faltam_str = f"Faltaram {faltam_cr} Cortes ou {faltam_rv} Reavisos para Faixa 1"
         bonificacao = 150.00
     else:
         faixa_nome = "Nenhuma Faixa"
@@ -272,14 +275,10 @@ def relatorio(message):
     hoje = agora_sp()
     segunda = hoje - timedelta(days=hoje.weekday())
     sabado = segunda + timedelta(days=5)
-    
-    data_ini = segunda.strftime("%d/%m")
-    data_fim = sabado.strftime("%d/%m")
 
-    # MENSAGEM 1: RESUMO DE BONIFICAÇÃO
     msg_bonificacao = (
         f"👋 Olá *{nome}*, segue abaixo a sua parcial da bonificação semanal:\n\n"
-        f"📅 *Semana Atual ({data_ini} a {data_fim}):*\n"
+        f"📅 *Semana Atual ({segunda.strftime('%d/%m')} a {sabado.strftime('%d/%m')}):*\n"
         f"• Cortes/Religações: {cr_total}\n"
         f"• Reavisos: {rv_total}\n"
         f"• Entregas: {en_total}\n"
@@ -288,42 +287,27 @@ def relatorio(message):
         f"• {faltam_str}\n"
         f"💰 *Bonificação parcial: R$ {bonificacao:,.2f}*\n\n"
         f"🏆 *Total da bonificação até agora: R$ {bonificacao:,.2f}*\n\n"
-        f"⚠️ *Atenção:* Esta é uma parcial da sua bonificação semanal.\n"
-        f"Os valores ainda estão sujeitos à auditoria e serão validados ao final do mês.\n"
-        f"Serão considerados apenas *serviços produtivos* para o cálculo final.\n"
-        f"Seu valor poderá ser deduzido em casos de *advertências ou suspensões*.\n"
-        f"Só serão considerados produtivos os serviços executados dentro da coordenada."
+        f"⚠️ *Atenção:* Esta é uma parcial da sua bonificação semanal."
     )
 
-    # MENSAGEM 2: TABELA DE EXECUÇÃO DIÁRIA
     dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
     linhas_tabela = []
 
     for idx, dia_chave in enumerate(dias_ordem):
         d = dias.get(dia_chave, {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0})
         dt_dia = (segunda + timedelta(days=idx)).strftime("%d/%m/%Y")
-        
         cr = d['corte'] + d['religacao']
         rv = d['reaviso']
         en = d.get('improdutivo', 0)
         ng = d.get('negociacao', 0)
-
         linhas_tabela.append(f"{dt_dia} | {cr:2d} | {rv:2d} | {en:2d} | {ng:2d}")
-
-    tabela_formatada = "\n".join(linhas_tabela)
 
     msg_tabela = (
         f"📅 *Serviços executados por dia:*\n\n"
-        f"📌 *Legenda:*\n"
-        f"CR = Cortes/Religações\n"
-        f"RV = Reavisos\n"
-        f"EN = Entregas\n"
-        f"NG = Negociações\n\n"
-        f"```text\n"
-        f"Data       | CR | RV | EN | NG\n"
-        f"-------------------------------\n"
-        f"{tabela_formatada}\n"
-        f"```"
+        f"📌 *Legenda:*\nCR = Cortes/Religações\nRV = Reavisos\nEN = Entregas\nNG = Negociações\n\n"
+        f"```text\nData       | CR | RV | EN | NG\n-------------------------------\n"
+        + "\n".join(linhas_tabela) +
+        f"\n```"
     )
 
     bot.send_message(message.chat.id, msg_bonificacao, parse_mode="Markdown")
@@ -333,51 +317,10 @@ def relatorio(message):
 def solicitar_reset_semana(message):
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
-    bot.reply_to(
-        message, 
-        "⚠️ *CONFIRMAÇÃO DE RESET SEMANAL*\n\n"
-        "Você tem certeza de que deseja **zerar a contagem desta semana**?\n"
-        "(Seu histórico permanente NÃO será apagado).", 
-        parse_mode="Markdown", 
-        reply_markup=teclado_confirmacao_reset_semana()
-    )
-
-@bot.message_handler(commands=['zerar_historico'])
-def solicitar_zerar_historico(message):
-    str_id = str(message.from_user.id)
-    inicializar_agente(str_id, message.from_user.first_name)
-    bot.reply_to(
-        message, 
-        "⚠️ *ATENÇÃO: AÇÃO IRREVERSÍVEL!*\n\n"
-        "Você está prestes a **apagar permanentemente todo o seu Histórico de Produção**.\n"
-        "Tem certeza de que deseja continuar?", 
-        parse_mode="Markdown", 
-        reply_markup=teclado_confirmacao_zerar()
-    )
-
-@bot.message_handler(commands=['corte', 'rel', 'rea', 'imp', 'religacao', 'reaviso', 'improdutivo'])
-def registrar_servico_manual(message):
-    str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
-    
-    comando = message.text.split()[0].lower()
-    
-    if comando == '/corte': tipo_id, tipo_nome = 'corte', 'Corte'
-    elif comando in ['/rel', '/religacao']: tipo_id, tipo_nome = 'religacao', 'Religação'
-    elif comando in ['/rea', '/reaviso']: tipo_id, tipo_nome = 'reaviso', 'Reaviso'
-    elif comando in ['/imp', '/improdutivo']: tipo_id, tipo_nome = 'improdutivo', 'Improdutivo'
-    else: return
-
-    try:
-        quantidade = int(message.text.split()[1])
-        processar_lancamento(str_id, tipo_id, tipo_nome, quantidade)
-        bot.reply_to(message, f"✅ *INPUT ACEITO*\nVolume processado: +{quantidade} {tipo_nome}(s)", parse_mode="Markdown")
-    except:
-        bot.reply_to(message, f"⚠️ *SINTAXE INCORRETA*\nEx: `{comando} 10`", parse_mode="Markdown")
+    bot.reply_to(message, "⚠️ *Deseja zerar a contagem desta semana?*", parse_mode="Markdown", reply_markup=teclado_confirmacao_reset_semana())
 
 # ==========================================
-# PROCESSAMENTO DE BOTÕES E CALLBACKS
+# PROCESSAMENTO DOS BOTÕES (POP-UPS NO MEIO DA TELA)
 # ==========================================
 def processar_lancamento(user_id, tipo_id, tipo_nome, quantidade):
     agora = agora_sp()
@@ -394,80 +337,70 @@ def callback_handler(call):
     user_id = str(call.from_user.id)
     inicializar_agente(user_id, call.from_user.first_name)
 
-    if call.data == 'prompt_corte':
-        msg = bot.send_message(call.message.chat.id, "✂️ *Quantos Cortes você deseja adicionar?*", parse_mode="Markdown")
+    # Lançamentos rápidos +1 com Alerta POP-UP no centro do celular
+    if call.data == 'add_corte_1':
+        processar_lancamento(user_id, 'corte', 'Corte', 1)
+        bot.answer_callback_query(call.id, text="⚡ +1 Corte Registrado!", show_alert=True)
+
+    elif call.data == 'add_religacao_1':
+        processar_lancamento(user_id, 'religacao', 'Religação', 1)
+        bot.answer_callback_query(call.id, text="⚡ +1 Religação Registrada!", show_alert=True)
+
+    elif call.data == 'add_reaviso_1':
+        processar_lancamento(user_id, 'reaviso', 'Reaviso', 1)
+        bot.answer_callback_query(call.id, text="⚡ +1 Reaviso Registrado!", show_alert=True)
+
+    # Entradas por digitação
+    elif call.data == 'prompt_corte':
+        msg = bot.send_message(call.message.chat.id, "✂️ *Quantos Cortes deseja adicionar?*", parse_mode="Markdown")
         bot.register_next_step_handler(msg, receber_qnt_corte)
         bot.answer_callback_query(call.id)
 
     elif call.data == 'prompt_religacao':
-        msg = bot.send_message(call.message.chat.id, "🔌 *Quantas Religações você deseja adicionar?*", parse_mode="Markdown")
+        msg = bot.send_message(call.message.chat.id, "🔌 *Quantas Religações deseja adicionar?*", parse_mode="Markdown")
         bot.register_next_step_handler(msg, receber_qnt_religacao)
         bot.answer_callback_query(call.id)
 
-    elif call.data == 'add_corte_1':
-        processar_lancamento(user_id, 'corte', 'Corte', 1)
-        bot.answer_callback_query(call.id, "✅ +1 Corte registrado!", show_alert=False)
-
-    elif call.data == 'add_religacao_1':
-        processar_lancamento(user_id, 'religacao', 'Religação', 1)
-        bot.answer_callback_query(call.id, "✅ +1 Religação registrada!", show_alert=False)
+    elif call.data == 'prompt_reaviso':
+        msg = bot.send_message(call.message.chat.id, "📄 *Quantos Reavisos deseja adicionar?*", parse_mode="Markdown")
+        bot.register_next_step_handler(msg, receber_qnt_reaviso)
+        bot.answer_callback_query(call.id)
 
     elif call.data == 'convert_corte_1':
         dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
-        qnt_atual_dia = usuarios[user_id]['producao_diaria'][dia_nome]['corte']
-        qnt_atual_total = usuarios[user_id]['totais_semana']['corte']
-        
-        if qnt_atual_total > 0:
-            usuarios[user_id]['producao_diaria'][dia_nome]['corte'] = max(0, qnt_atual_dia - 1)
-            usuarios[user_id]['totais_semana']['corte'] = max(0, qnt_atual_total - 1)
+        if usuarios[user_id]['totais_semana']['corte'] > 0:
+            usuarios[user_id]['producao_diaria'][dia_nome]['corte'] -= 1
+            usuarios[user_id]['totais_semana']['corte'] -= 1
             usuarios[user_id]['producao_diaria'][dia_nome]['improdutivo'] += 1
             usuarios[user_id]['totais_semana']['improdutivo'] += 1
             salvar_banco(usuarios)
-            bot.answer_callback_query(call.id, "🔄 1 Corte convertido em Improdutivo!", show_alert=False)
+            bot.answer_callback_query(call.id, text="🔄 1 Corte convertido em Improdutivo!", show_alert=True)
         else:
-            bot.answer_callback_query(call.id, "⚠️ Você não possui cortes nesta semana para converter!", show_alert=True)
+            bot.answer_callback_query(call.id, text="⚠️ Sem cortes para converter!", show_alert=True)
 
     elif call.data == 'convert_religacao_1':
         dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
-        qnt_atual_dia = usuarios[user_id]['producao_diaria'][dia_nome]['religacao']
-        qnt_atual_total = usuarios[user_id]['totais_semana']['religacao']
-        
-        if qnt_atual_total > 0:
-            usuarios[user_id]['producao_diaria'][dia_nome]['religacao'] = max(0, qnt_atual_dia - 1)
-            usuarios[user_id]['totais_semana']['religacao'] = max(0, qnt_atual_total - 1)
+        if usuarios[user_id]['totais_semana']['religacao'] > 0:
+            usuarios[user_id]['producao_diaria'][dia_nome]['religacao'] -= 1
+            usuarios[user_id]['totais_semana']['religacao'] -= 1
             usuarios[user_id]['producao_diaria'][dia_nome]['improdutivo'] += 1
             usuarios[user_id]['totais_semana']['improdutivo'] += 1
             salvar_banco(usuarios)
-            bot.answer_callback_query(call.id, "🔄 1 Religação convertida em Improdutivo!", show_alert=False)
+            bot.answer_callback_query(call.id, text="🔄 1 Religação convertida em Improdutivo!", show_alert=True)
         else:
-            bot.answer_callback_query(call.id, "⚠️ Você não possui religações nesta semana para converter!", show_alert=True)
+            bot.answer_callback_query(call.id, text="⚠️ Sem religações para converter!", show_alert=True)
 
     elif call.data == 'confirm_reset_semana':
         usuarios[user_id]['totais_semana'] = {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0}
         for dia in DIAS_SEMANA.values():
             usuarios[user_id]['producao_diaria'][dia] = {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0}
         salvar_banco(usuarios)
-        
-        bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO!*\nA contagem da semana foi zerada com sucesso.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Semana zerada!")
+        bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO!*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id, text="Semana zerada!", show_alert=True)
 
     elif call.data == 'cancel_reset_semana':
-        bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*\nSua produção semanal continua mantida.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Cancelado!")
-
-    elif call.data == 'confirm_zerar_hist':
-        usuarios[user_id]['historico_permanente'] = []
-        salvar_banco(usuarios)
-        bot.edit_message_text("🗑️ *HISTÓRICO PERMANENTE ZERADO!*\nTodos os registros antigos foram apagados com sucesso.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Histórico apagado!")
-
-    elif call.data == 'cancel_zerar_hist':
-        bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*\nSeu histórico permanece gravado com segurança.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Cancelado!")
+        bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id)
 
 print("Sistema Global Online. Aguardando conexão...")
 bot.infinity_polling()
