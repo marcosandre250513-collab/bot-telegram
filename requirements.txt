@@ -2,3 +2,4 @@ pyTelegramBotAPI
 flask
 pillow
 reportlab
+psycopg2-binary
