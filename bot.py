@@ -108,6 +108,29 @@ def processar_lancamento(user_id, tipo_id, quantidade, dia_especifico=None):
     cur.close()
     conn.close()
 
+def converter_reaviso_para_maos(user_id, quantidade=1):
+    """Converte a quantidade de reavisos comuns/outros para entregues em mãos."""
+    str_id = str(user_id)
+    agora = agora_sp()
+    dia_nome = DIAS_SEMANA.get(agora.weekday(), 'SAB')
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute('''
+        INSERT INTO lancamentos (user_id, data_registro, dia_semana, tipo, quantidade, semana_ativa)
+        VALUES (%s, %s, %s, 'reaviso_maos', %s, TRUE)
+    ''', (str_id, agora, dia_nome, quantidade))
+    
+    cur.execute('''
+        INSERT INTO lancamentos (user_id, data_registro, dia_semana, tipo, quantidade, semana_ativa)
+        VALUES (%s, %s, %s, 'reaviso_outros', %s, TRUE)
+    ''', (str_id, agora, dia_nome, -quantidade))
+    
+    conn.commit()
+    cur.close()
+    conn.close()
+
 def obter_resumo_semana(user_id):
     str_id = str(user_id)
     conn = get_db_connection()
@@ -152,10 +175,10 @@ def obter_resumo_semana(user_id):
     return totais, producao_diaria
 
 # ==========================================
-# MENUS E TECLADOS INTERATIVOS
+# MENUS E TECLADOS INTERATIVOS (FIXO)
 # ==========================================
 def menu_principal_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
     btn_registrar = types.KeyboardButton('⚡ Registrar Produção')
     btn_comandos = types.KeyboardButton('📜 Lista de Comandos')
@@ -168,20 +191,15 @@ def menu_principal_keyboard():
 def teclado_registro_rapido():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("✂️ Corte +1", callback_data="add_corte_1"),
-        types.InlineKeyboardButton("🔌 Religue +1", callback_data="add_religacao_1")
-    )
-    markup.add(
-        types.InlineKeyboardButton("✋ Reaviso Mãos +1", callback_data="add_reaviso_maos_1"),
-        types.InlineKeyboardButton("📬 Reaviso Outros +1", callback_data="add_reaviso_outros_1")
+        types.InlineKeyboardButton("🔌 Religue +1", callback_data="add_religacao_1"),
+        types.InlineKeyboardButton("✋ +1 em Mãos", callback_data="convert_maos_1")
     )
     markup.add(
         types.InlineKeyboardButton("✂️ Corte (Digitar Qnt)", callback_data="prompt_corte"),
         types.InlineKeyboardButton("🔌 Religação (Digitar Qnt)", callback_data="prompt_religacao")
     )
     markup.add(
-        types.InlineKeyboardButton("✋ Reaviso Mãos (Qnt)", callback_data="prompt_reaviso_maos"),
-        types.InlineKeyboardButton("📬 Reaviso Outros (Qnt)", callback_data="prompt_reaviso_outros")
+        types.InlineKeyboardButton("📬 Add Reavisos (Digitar Qnt)", callback_data="prompt_reaviso_outros")
     )
     return markup
 
@@ -222,27 +240,31 @@ def receber_qnt_religacao(message):
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
-def receber_qnt_reaviso_maos(message):
-    try:
-        qnt = int(message.text)
-        user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'reaviso_maos', qnt)
-        bot.reply_to(message, f"✅ *+ {qnt} Reaviso(s) Em Mãos* adicionado(s)!", parse_mode="Markdown")
-    except:
-        bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
-
 def receber_qnt_reaviso_outros(message):
     try:
         qnt = int(message.text)
         user_id = str(message.from_user.id)
         processar_lancamento(user_id, 'reaviso_outros', qnt)
-        bot.reply_to(message, f"✅ *+ {qnt} Reaviso(s) Outros* adicionado(s)!", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ *+ {qnt} Reaviso(s)* adicionado(s) à sua carga!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
 # ==========================================
-# COMANDO DE AJUSTE MANUAL
+# COMANDOS E CONVERSÃO
 # ==========================================
+@bot.message_handler(commands=['maos'])
+def converter_maos_manual(message):
+    str_id = str(message.from_user.id)
+    nome = message.from_user.first_name
+    inicializar_agente(str_id, nome)
+    try:
+        partes = message.text.split()
+        qnt = int(partes[1]) if len(partes) > 1 else 1
+        converter_reaviso_para_maos(str_id, qnt)
+        bot.reply_to(message, f"✋ *{qnt} Reaviso(s) ajustado(s) para EM MÃOS!*", parse_mode="Markdown")
+    except:
+        bot.reply_to(message, "⚠️ Sintaxe: `/maos` para 1 ou `/maos 5` para vários.", parse_mode="Markdown")
+
 @bot.message_handler(commands=['addcorte', 'cortedia'])
 def add_corte_dia_especifico(message):
     str_id = str(message.from_user.id)
@@ -254,7 +276,7 @@ def add_corte_dia_especifico(message):
         if len(partes) < 3:
             return bot.reply_to(
                 message, 
-                "⚠️ *SINTAXE INCORRETA*\nUse: `/addcorte [dia] [qnt]`\nEx: `/addcorte seg 10` ou `/addcorte terca 5`\n\nDias aceitos: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`",
+                "⚠️ *SINTAXE INCORRETA*\nUse: `/addcorte [dia] [qnt]`\nEx: `/addcorte seg 10`",
                 parse_mode="Markdown"
             )
 
@@ -299,15 +321,15 @@ def listar_comandos(message):
     texto = (
         "📜 *LISTA DE COMANDOS DO BOT*\n\n"
         "📊 *Relatórios e Geral:*\n"
-        "• `/relatorio` ou `/prod` - Exibe o relatório de bonificação e produção\n"
+        "• `/relatorio` ou `/prod` - Exibe o relatório de bonificação\n"
         "• `/comandos` - Exibe esta lista de comandos\n"
-        "• `/resetar` - Zera os dados da semana atual\n"
+        "• `/resetar` - Zera a contagem da semana atual\n"
         "• `/zerar_historico` - Apaga o histórico permanente\n\n"
         "⚡ *Lançamentos Diretos por Texto:*\n"
         "• `/corte [qnt]` - Registra cortes (Ex: `/corte 10`)\n"
         "• `/rel [qnt]` - Registra religações (Ex: `/rel 5`)\n"
-        "• `/reamaos [qnt]` - Registra reavisos entregues em mãos (Ex: `/reamaos 12`)\n"
-        "• `/reaoutros [qnt]` - Registra reavisos outros (Ex: `/reaoutros 8`)\n"
+        "• `/rea [qnt]` - Registra carga de reavisos (Ex: `/rea 30`)\n"
+        "• `/maos [qnt]` - Converte reavisos para em mãos (Ex: `/maos 1` ou `/maos 5`)\n"
         "• `/imp [qnt]` - Registra improdutivos/entregas (Ex: `/imp 2`)\n\n"
         "⚙️ *Ajustes Específicos:*\n"
         "• `/addcorte [dia] [qnt]` - Adiciona cortes em dia específico (Ex: `/addcorte seg 10`)"
@@ -322,7 +344,7 @@ def start(message):
     texto = (
         f"🌐 *MEU SISTEMA DE PERFORMANCE*\n"
         f"Bem-vindo, {nome}.\n\n"
-        "Selecione uma opção no menu abaixo para operar o sistema:"
+        "Menu fixo ativado. Selecione uma opção para operar:"
     )
     bot.reply_to(message, texto, parse_mode="Markdown", reply_markup=menu_principal_keyboard())
 
@@ -449,7 +471,7 @@ def relatorio(message):
     bot.send_message(message.chat.id, msg_diario, parse_mode="Markdown")
 
 # --- COMANDOS DIGITADOS MANUAIS ---
-@bot.message_handler(commands=['corte', 'rel', 'rea', 'reamaos', 'reaoutros', 'imp', 'religacao', 'improdutivo'])
+@bot.message_handler(commands=['corte', 'rel', 'rea', 'imp', 'religacao', 'improdutivo'])
 def registrar_servico_manual(message):
     str_id = str(message.from_user.id)
     nome = message.from_user.first_name
@@ -459,8 +481,7 @@ def registrar_servico_manual(message):
     
     if comando == '/corte': tipo_id, tipo_nome = 'corte', 'Corte'
     elif comando in ['/rel', '/religacao']: tipo_id, tipo_nome = 'religacao', 'Religação'
-    elif comando == '/reamaos': tipo_id, tipo_nome = 'reaviso_maos', 'Reaviso (Em Mãos)'
-    elif comando in ['/rea', '/reaoutros']: tipo_id, tipo_nome = 'reaviso_outros', 'Reaviso (Outros)'
+    elif comando in ['/rea']: tipo_id, tipo_nome = 'reaviso_outros', 'Reaviso'
     elif comando in ['/imp', '/improdutivo']: tipo_id, tipo_nome = 'improdutivo', 'Improdutivo'
     else: return
 
@@ -515,31 +536,18 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, receber_qnt_religacao)
         bot.answer_callback_query(call.id)
 
-    elif call.data == 'prompt_reaviso_maos':
-        msg = bot.send_message(call.message.chat.id, "✋ *Quantos Reavisos (Em Mãos) deseja adicionar?*", parse_mode="Markdown")
-        bot.register_next_step_handler(msg, receber_qnt_reaviso_maos)
-        bot.answer_callback_query(call.id)
-
     elif call.data == 'prompt_reaviso_outros':
-        msg = bot.send_message(call.message.chat.id, "📬 *Quantos Reavisos (Outros) deseja adicionar?*", parse_mode="Markdown")
+        msg = bot.send_message(call.message.chat.id, "📬 *Quantos Reavisos deseja adicionar à sua carga?*", parse_mode="Markdown")
         bot.register_next_step_handler(msg, receber_qnt_reaviso_outros)
         bot.answer_callback_query(call.id)
 
-    elif call.data == 'add_corte_1':
-        processar_lancamento(user_id, 'corte', 1)
-        bot.answer_callback_query(call.id, "✂️ +1 Corte Registrado com Sucesso!", show_alert=True)
-
     elif call.data == 'add_religacao_1':
         processar_lancamento(user_id, 'religacao', 1)
-        bot.answer_callback_query(call.id, "🔌 +1 Religação Registrada com Sucesso!", show_alert=True)
+        bot.answer_callback_query(call.id, "🔌 +1 Religação Registrada!", show_alert=True)
 
-    elif call.data == 'add_reaviso_maos_1':
-        processar_lancamento(user_id, 'reaviso_maos', 1)
-        bot.answer_callback_query(call.id, "✋ +1 Reaviso (Em Mãos) Registrado!", show_alert=True)
-
-    elif call.data == 'add_reaviso_outros_1':
-        processar_lancamento(user_id, 'reaviso_outros', 1)
-        bot.answer_callback_query(call.id, "📬 +1 Reaviso (Outros) Registrado!", show_alert=True)
+    elif call.data == 'convert_maos_1':
+        converter_reaviso_para_maos(user_id, 1)
+        bot.answer_callback_query(call.id, "✋ +1 Reaviso ajustado para EM MÃOS!", show_alert=True)
 
     elif call.data == 'confirm_reset_semana':
         conn = get_db_connection()
