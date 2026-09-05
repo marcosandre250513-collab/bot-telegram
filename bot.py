@@ -7,6 +7,7 @@ from flask import Flask
 from threading import Thread
 import json
 import os
+import time
 
 # --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
@@ -319,7 +320,6 @@ def relatorio(message):
     en = totais.get('improdutivo', 0)
     ng = totais.get('negociacao', 0)
     
-    # Cálculo de Porcentagem dos Reavisos
     if rv_total > 0:
         pct_maos = (rv_maos / rv_total) * 100
         pct_outros = (rv_outros / rv_total) * 100
@@ -355,7 +355,6 @@ def relatorio(message):
         falta_str = f"Faltam {faltam_c} Cortes ou {faltam_r} Reavisos para Faixa 1"
         bonificacao = 0.00
 
-    # MENSAGEM 1: RESUMO DE BONIFICAÇÃO
     bonif_str = f"{bonificacao:,.2f}".replace('.', ',')
     msg_bonif = (
         f"👋 Olá {nome.upper()}, segue abaixo a sua parcial da bonificação semanal:\n\n"
@@ -372,7 +371,6 @@ def relatorio(message):
     
     bot.send_message(message.chat.id, msg_bonif)
 
-    # MENSAGEM 2: DETALHAMENTO DIÁRIO EM TABELA
     dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
     linhas_tabela = []
     
@@ -405,7 +403,7 @@ def relatorio(message):
 
     bot.send_message(message.chat.id, msg_diario, parse_mode="Markdown")
 
-# --- COMANDOS DIGITADOS MANUAIS (/corte 10, /rel 5, /reamaos 10, etc) ---
+# --- COMANDOS DIGITADOS MANUAIS ---
 @bot.message_handler(commands=['corte', 'rel', 'rea', 'reamaos', 'reaoutros', 'imp', 'religacao', 'improdutivo'])
 def registrar_servico_manual(message):
     str_id = str(message.from_user.id)
@@ -472,7 +470,6 @@ def callback_handler(call):
     user_id = str(call.from_user.id)
     inicializar_agente(user_id, call.from_user.first_name)
 
-    # BOTÕES DE PROMPT DE QUANTIDADE
     if call.data == 'prompt_corte':
         msg = bot.send_message(call.message.chat.id, "✂️ *Quantos Cortes você deseja adicionar?*", parse_mode="Markdown")
         bot.register_next_step_handler(msg, receber_qnt_corte)
@@ -493,7 +490,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, receber_qnt_reaviso_outros)
         bot.answer_callback_query(call.id)
 
-    # BOTÕES DE REGISTRO RÁPIDO (+1) COM POP-UP CENTRAL E SOM (show_alert=True)
     elif call.data == 'add_corte_1':
         processar_lancamento(user_id, 'corte', 'Corte', 1)
         bot.answer_callback_query(call.id, "✂️ +1 Corte Registrado com Sucesso!", show_alert=True)
@@ -541,5 +537,13 @@ def callback_handler(call):
                               chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Cancelado!")
 
+# --- INICIALIZAÇÃO SEGURA DO BOT ---
+print("Limpando conexões anteriores e inicializando...")
+try:
+    bot.remove_webhook()
+    time.sleep(1)
+except Exception as e:
+    print(f"Aviso ao limpar webhook: {e}")
+
 print("Sistema Global Online. Aguardando conexão...")
-bot.infinity_polling()
+bot.infinity_polling(skip_pending=True)
