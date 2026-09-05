@@ -1,6 +1,7 @@
 import telebot
 from telebot import types
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import math
 from flask import Flask
 from threading import Thread
@@ -9,8 +10,8 @@ import json
 import os
 from PIL import Image, ImageDraw, ImageFont
 
-# --- CONFIGURAÇÃO DO FUSO HORÁRIO NATIVO (SÃO PAULO / BRASÍLIA UTC-3) ---
-FUSO_SP = timezone(timedelta(hours=-3))
+# --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
+FUSO_SP = ZoneInfo('America/Sao_Paulo')
 
 def agora_sp():
     """Retorna a data e hora atual no fuso oficial de São Paulo (UTC-3)."""
@@ -30,7 +31,7 @@ t = Thread(target=run)
 t.start()
 # --------------------------------
 
-TOKEN = '8804109455:AAHPqPuDSp2cB_VANRG4EsJOevrw9sydRf8'
+TOKEN = '8804109455:AAHeMGTy2A12ePXD3fjS_n_MST8oVY7oN8k'
 bot = telebot.TeleBot(TOKEN)
 
 PESO_SERVICO = 13.64
@@ -134,65 +135,57 @@ def teclado_confirmacao_zerar():
     return markup
 
 # ==========================================
-# GERADOR DE IMAGEM: RELATÓRIO DA SEMANA (TEMA CLARO)
+# GERADOR DE IMAGEM: RELATÓRIO DA SEMANA
 # ==========================================
 def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg):
-    img = Image.new('RGB', (900, 1500), color='#f1f5f9')
+    img = Image.new('RGB', (900, 1500), color='#0f172a')
     draw = ImageDraw.Draw(img)
     
     font_title = get_font(32)
     font_sub = get_font(22)
     font_main = get_font(24)
-    font_small = get_font(18)
+    font_small = get_font(16)
 
-    COR_FUNDO = '#f1f5f9'
-    COR_CARD = '#ffffff'
-    COR_BORDA = '#cbd5e1'
-    COR_TEXTO = '#0f172a'
-    COR_SUBTEXTO = '#475569'
-    COR_DESTAQUE = '#0284c7' 
-    COR_ALERTA = '#dc2626'   
-    COR_TABELA_HDR = '#1e293b'
-    COR_ZEBRA = '#f8fafc'
+    COR_FUNDO = '#0f172a'
+    COR_CARD = '#1e293b'
+    COR_BORDA = '#334155'
+    COR_TEXTO = '#f1f5f9'
+    COR_SUBTEXTO = '#94a3b8'
+    COR_DESTAQUE = '#38bdf8' 
+    COR_ALERTA = '#f87171'   
 
-    # CABEÇALHO SUPERIOR (DARK SLATE PARA CONTRASTE EXECUTIVO)
-    draw.rectangle([0, 0, 900, 130], fill='#0f172a')
-    draw.text((40, 28), "MINHA PERFORMANCE", fill='#ffffff', font=font_title)
+    # CABEÇALHO
+    draw.rectangle([0, 0, 900, 130], fill='#020617')
+    draw.text((40, 30), "MINHA PERFORMANCE", fill=COR_TEXTO, font=font_title)
     
     hoje = agora_sp()
     data_emissao = hoje.strftime("%d/%m/%Y - %H:%M:%S")
-    draw.text((40, 78), f"EMISSÃO: {data_emissao} | AGENTE: {nome.upper()}", fill='#38bdf8', font=font_sub)
+    draw.text((40, 80), f"EMISSAO: {data_emissao} | AGENTE: {nome.upper()}", fill=COR_DESTAQUE, font=font_sub)
 
-    # CARD STATUS ATUAL
-    draw.rectangle([40, 150, 860, 250], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 170), f"STATUS ATUAL: {status_msg}", fill=COR_DESTAQUE, font=font_main)
-    draw.text((60, 208), "📌 PAINEL DE AUTO-GESTÃO E PERFORMANCE", fill=COR_SUBTEXTO, font=font_sub)
+    # CARD STATUS ATUAL (LIMPO E COM BADGE DE APOIO)
+    draw.rectangle([40, 160, 860, 260], fill=COR_CARD, outline=COR_BORDA, width=2)
+    draw.text((60, 180), f"STATUS ATUAL: {status_msg}", fill=COR_DESTAQUE, font=font_main)
+    draw.text((60, 218), "📌 PAINEL INDEPENDENTE DE APOIO OPERACIONAL", fill=COR_SUBTEXTO, font=font_sub)
 
-    # CARD DETALHAMENTO COM TABELA FORMATADA
-    draw.rectangle([40, 275, 860, 685], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 292), "DETALHAMENTO DA PRODUÇÃO SEMANAL", fill=COR_TEXTO, font=font_main)
+    # CARD DETALHAMENTO
+    draw.rectangle([40, 290, 860, 680], fill=COR_CARD, outline=COR_BORDA, width=2)
+    draw.text((60, 310), "DETALHAMENTO DA PRODUCAO SEMANAL", fill=COR_TEXTO, font=font_main)
+    draw.line([40, 350, 860, 350], fill=COR_BORDA, width=2)
 
-    # CABEÇALHO DA TABELA
-    draw.rectangle([50, 330, 850, 375], fill=COR_TABELA_HDR)
-    
-    x_dia, x_corte, x_rel, x_rea, x_imp, x_tot = 65, 215, 345, 475, 605, 735
-    draw.text((x_dia, 340), "DIA (DATA)", fill='#ffffff', font=font_sub)
-    draw.text((x_corte, 340), "CORTE", fill='#ffffff', font=font_sub)
-    draw.text((x_rel, 340), "RELIG", fill='#ffffff', font=font_sub)
-    draw.text((x_rea, 340), "REAVISO", fill='#ffffff', font=font_sub)
-    draw.text((x_imp, 340), "IMP.", fill='#fca5a5', font=font_sub)
-    draw.text((x_tot, 340), "TOTAL", fill='#7dd3fc', font=font_sub)
+    x_dia, x_corte, x_rel, x_rea, x_imp, x_tot = 60, 210, 330, 460, 600, 740
+    draw.text((x_dia, 370), "DIA (DATA)", fill=COR_SUBTEXTO, font=font_main)
+    draw.text((x_corte, 370), "CORTE", fill=COR_SUBTEXTO, font=font_main)
+    draw.text((x_rel, 370), "RELIG", fill=COR_SUBTEXTO, font=font_main)
+    draw.text((x_rea, 370), "REAVISO", fill=COR_SUBTEXTO, font=font_main)
+    draw.text((x_imp, 370), "IMP.", fill=COR_ALERTA, font=font_main)
+    draw.text((x_tot, 370), "TOTAL", fill=COR_DESTAQUE, font=font_main)
+    draw.line([40, 410, 860, 410], fill=COR_BORDA, width=2)
 
-    # LINHAS DA TABELA (COM ZEBRADO E GRADE)
-    y_row = 375
+    y = 430
     valores_dias = []
     
     segunda_feira = hoje - timedelta(days=hoje.weekday())
     dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
-    
-    # Colunas verticais da grade
-    cols_x = [50, 200, 330, 460, 590, 720, 850]
-
     for idx, dia in enumerate(dias_ordem):
         d = dias.get(dia, {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0})
         total_prod = d['corte'] + d['religacao'] + d['reaviso']
@@ -201,32 +194,18 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg):
         nome_exibicao = f"{dia[:3]} {data_dia}"
         valores_dias.append((nome_exibicao, total_prod))
         
-        # Fundo zebrado
-        cor_fundo_linha = COR_ZEBRA if idx % 2 == 0 else '#ffffff'
-        draw.rectangle([50, y_row, 850, y_row + 45], fill=cor_fundo_linha)
-        
-        # Linha horizontal
-        draw.line([50, y_row + 45, 850, y_row + 45], fill=COR_BORDA, width=1)
-        
-        # Textos das células
-        y_text = y_row + 10
-        draw.text((x_dia, y_text), nome_exibicao, fill=COR_TEXTO, font=font_main)
-        draw.text((x_corte, y_text), f"{d['corte']}", fill=COR_TEXTO, font=font_main)
-        draw.text((x_rel, y_text), f"{d['religacao']}", fill=COR_TEXTO, font=font_main)
-        draw.text((x_rea, y_text), f"{d['reaviso']}", fill=COR_TEXTO, font=font_main)
-        draw.text((x_imp, y_text), f"{d['improdutivo']}", fill=COR_ALERTA, font=font_main)
-        draw.text((x_tot, y_text), f"{total_prod}", fill=COR_DESTAQUE, font=font_main)
-        
-        y_row += 45
+        draw.text((x_dia, y), nome_exibicao, fill=COR_TEXTO, font=font_main)
+        draw.text((x_corte, y), f"{d['corte']}", fill=COR_TEXTO, font=font_main)
+        draw.text((x_rel, y), f"{d['religacao']}", fill=COR_TEXTO, font=font_main)
+        draw.text((x_rea, y), f"{d['reaviso']}", fill=COR_TEXTO, font=font_main)
+        draw.text((x_imp, y), f"{d['improdutivo']}", fill=COR_ALERTA, font=font_main)
+        draw.text((x_tot, y), f"{total_prod}", fill=COR_DESTAQUE, font=font_main)
+        y += 40  
 
-    # Desenhar linhas verticais da grade
-    for cx in cols_x:
-        draw.line([cx, 330, cx, y_row], fill=COR_BORDA, width=1)
-
-    # CARD 2: GRÁFICO DE COLUNAS (BARRAS VERTICAIS)
+    # CARD 2: GRÁFICO DE COLUNAS
     draw.rectangle([40, 710, 860, 950], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 728), "DESEMPENHO DIÁRIO (COLUNAS)", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 765, 860, 765], fill=COR_BORDA, width=1)
+    draw.text((60, 730), "DESEMPENHO DIARIO (COLUNAS)", fill=COR_TEXTO, font=font_main)
+    draw.line([40, 770, 860, 770], fill=COR_BORDA, width=2)
 
     max_valor = max([v[1] for v in valores_dias] + [1])
     x_pos = 100
@@ -240,8 +219,7 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg):
         y1 = y_base - altura
         y2 = y_base
         
-        # Barra do gráfico
-        draw.rectangle([x1, y1, x2, y2], fill=COR_DESTAQUE, outline='#0369a1', width=1)
+        draw.rectangle([x1, y1, x2, y2], fill=COR_DESTAQUE, outline=COR_BORDA, width=1)
         draw.text((x_pos - 28, 912), dia_nome, fill=COR_SUBTEXTO, font=font_small)
         
         if valor > 0:
@@ -249,10 +227,10 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg):
             
         x_pos += espaco
 
-    # CARD 3: STATUS DAS FAIXAS E PROGRESSÃO DE METAS
-    draw.rectangle([40, 975, 860, 1370], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 992), "STATUS DAS FAIXAS E PROGRESSÃO DE METAS", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 1030, 860, 1030], fill=COR_BORDA, width=1)
+    # CARD 3: STATUS DAS FAIXAS
+    draw.rectangle([40, 980, 860, 1380], fill=COR_CARD, outline=COR_BORDA, width=2)
+    draw.text((60, 1000), "STATUS DAS FAIXAS E PROGRESSAO DE METAS", fill=COR_TEXTO, font=font_main)
+    draw.line([40, 1040, 860, 1040], fill=COR_BORDA, width=2)
 
     hoje_idx = hoje.weekday()
     dias_restantes = max(1, 6 - hoje_idx)
@@ -267,28 +245,27 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg):
         faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
         media_servicos = math.ceil(faltam_servicos / dias_restantes)
         
-        return f"Faltam {faltam_servicos} Serviços ({media_servicos}/dia) ou {faltam_reavisos} Reavisos"
+        return f"Faltam {faltam_servicos} Servicos ({media_servicos}/dia) ou {faltam_reavisos} Reavisos"
 
     total_servicos_brutos = totais['corte'] + totais['religacao'] + totais['reaviso']
-    draw.text((60, 1048), f"VOLUME PRODUTIVO TOTAL: {total_servicos_brutos} Serviços", fill=COR_TEXTO, font=font_main)
-    draw.text((60, 1083), f"VOLUME IMPRODUTIVO TOTAL: {totais['improdutivo']} Serviços", fill=COR_ALERTA, font=font_main)
+    draw.text((60, 1060), f"VOLUME PRODUTIVO TOTAL: {total_servicos_brutos} Servicos", fill=COR_TEXTO, font=font_main)
+    draw.text((60, 1095), f"VOLUME IMPRODUTIVO TOTAL: {totais['improdutivo']} Servicos", fill=COR_ALERTA, font=font_main)
 
     m_f1, m_f2, m_f3 = 250, 300, 350
-    faixas = [(1, m_f1, "#d97706"), (2, m_f2, "#7c3aed"), (3, m_f3, "#059669")]
-    y_faixa = 1135
+    faixas = [(1, m_f1, "#f59e0b"), (2, m_f2, "#8b5cf6"), (3, m_f3, "#10b981")]
+    y_faixa = 1150
     for num, meta_qnt, cor in faixas:
         meta_pontos = meta_qnt * PESO_SERVICO
         pct = min(1.0, pontos_total / meta_pontos) if meta_pontos > 0 else 0
         draw.text((60, y_faixa), f"FAIXA {num}: {text_meta(meta_qnt)} [{int(pct * 100)}%]", fill=COR_TEXTO, font=font_main)
-        draw.rectangle([60, y_faixa + 32, 840, y_faixa + 45], fill='#e2e8f0', outline=COR_BORDA, width=1)
+        draw.rectangle([60, y_faixa + 35, 840, y_faixa + 50], fill=COR_FUNDO, outline=COR_BORDA, width=1)
         if pct > 0: 
-            draw.rectangle([60, y_faixa + 32, 60 + (780 * pct), y_faixa + 45], fill=cor)
-        y_faixa += 70
+            draw.rectangle([60, y_faixa + 35, 60 + (780 * pct), y_faixa + 50], fill=cor)
+        y_faixa += 75
 
-    # CARD DE DESTAQUE NO RODAPÉ (TEMA CLARO COM ASSINATURA EXECUTIVA)
-    draw.rectangle([40, 1395, 860, 1475], fill='#f0f9ff', outline=COR_DESTAQUE, width=2)
-    draw.text((60, 1408), "📌 PAINEL DE AUTO-GESTÃO E PERFORMANCE - APOIO DE CAMPO", fill=COR_DESTAQUE, font=font_sub)
-    draw.text((60, 1442), "⚡ Desenvolvido por Agente de Campo para controle e otimização de metas.", fill=COR_SUBTEXTO, font=font_small)
+    # RODAPÉ COM AVISO DE USO PESSOAL / CRIADO POR AGENTE DE CAMPO
+    draw.text((40, 1415), "⚠️ FERRAMENTA NAO OFICIAL - USO PESSOAL E INDEPENDENTE", fill=COR_SUBTEXTO, font=font_small)
+    draw.text((40, 1440), "⚡ Criado por Agente de Campo para auxilio e controle de performance.", fill=COR_SUBTEXTO, font=font_small)
 
     buffer = io.BytesIO()
     img.save(buffer, format='PNG')
@@ -296,24 +273,24 @@ def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg):
     return buffer
 
 # ==========================================
-# GERADOR DE IMAGEM: LOG HISTÓRICO (ÚLTIMOS 180 - TEMA CLARO)
+# GERADOR DE IMAGEM: LOG HISTÓRICO (ÚLTIMOS 180)
 # ==========================================
 def gerar_imagem_historico(nome, historico):
-    img = Image.new('RGB', (900, 1300), color='#f1f5f9')
+    img = Image.new('RGB', (900, 1300), color='#0f172a')
     draw = ImageDraw.Draw(img)
     
     font_title = get_font(32)
     font_sub = get_font(22)
     font_main = get_font(26)
-    font_small = get_font(18)
+    font_small = get_font(16)
 
-    COR_FUNDO, COR_CARD, COR_BORDA = '#f1f5f9', '#ffffff', '#cbd5e1'
-    COR_TEXTO, COR_SUBTEXTO, COR_DESTAQUE = '#0f172a', '#475569', '#0284c7' 
-    COR_ALERTA = '#dc2626'
+    COR_FUNDO, COR_CARD, COR_BORDA = '#0f172a', '#1e293b', '#334155'
+    COR_TEXTO, COR_SUBTEXTO, COR_DESTAQUE = '#f1f5f9', '#94a3b8', '#38bdf8' 
+    COR_ALERTA = '#f87171'
 
-    draw.rectangle([0, 0, 900, 130], fill='#0f172a')
-    draw.text((40, 28), "AUDITORIA DE DADOS - LOG PERMANENTE", fill='#ffffff', font=font_title)
-    draw.text((40, 78), f"AGENTE: {nome.upper()} | PAINEL DE AUTO-GESTÃO", fill='#38bdf8', font=font_sub)
+    draw.rectangle([0, 0, 900, 130], fill='#020617')
+    draw.text((40, 30), "AUDITORIA DE DADOS - LOG PERMANENTE", fill=COR_TEXTO, font=font_title)
+    draw.text((40, 80), f"AGENTE: {nome.upper()} | USO PESSOAL", fill=COR_DESTAQUE, font=font_sub)
 
     historico_180 = historico[-180:]
     total_geral = sum(item['quantidade'] for item in historico_180 if item['tipo'] != 'Improdutivo')
@@ -328,13 +305,13 @@ def gerar_imagem_historico(nome, historico):
     ultimos_dias = list(agrupado.keys())[-7:]
     valores_grafico = [(d, agrupado[d]) for d in ultimos_dias]
 
-    draw.rectangle([40, 150, 860, 250], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 170), f"VOLUME HISTÓRICO TOTAL: {total_geral} serviços (Ativos)", fill=COR_DESTAQUE, font=font_main)
-    draw.text((60, 208), f"TOTAL DE EVENTOS: {len(historico_180)} registros (últimos 180)", fill=COR_TEXTO, font=font_main)
+    draw.rectangle([40, 160, 860, 260], fill=COR_CARD, outline=COR_BORDA, width=2)
+    draw.text((60, 180), f"VOLUME HISTORICO TOTAL: {total_geral} servicos (Ativos)", fill=COR_DESTAQUE, font=font_main)
+    draw.text((60, 215), f"TOTAL DE EVENTOS: {len(historico_180)} registros (ultimos 180)", fill=COR_TEXTO, font=font_main)
 
-    draw.rectangle([40, 275, 860, 625], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 292), "CURVA DE EVOLUÇÃO HISTÓRICA (Últimos dias ativos)", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 330, 860, 330], fill=COR_BORDA, width=1)
+    draw.rectangle([40, 290, 860, 640], fill=COR_CARD, outline=COR_BORDA, width=2)
+    draw.text((60, 310), "CURVA DE EVOLUCAO HISTORICA (Ultimos dias ativos)", fill=COR_TEXTO, font=font_main)
+    draw.line([40, 350, 860, 350], fill=COR_BORDA, width=2)
 
     if valores_grafico:
         max_valor = max([v[1] for v in valores_grafico] + [1])
@@ -345,10 +322,10 @@ def gerar_imagem_historico(nome, historico):
         
         for dia_nome, valor in valores_grafico:
             altura = (valor / max_valor) * 180 if max_valor > 0 else 0
-            y_pos = 560 - altura
+            y_pos = 580 - altura
             pontos_grafico.append((x_pos, y_pos))
             
-            draw.text((x_pos - 20, 580), dia_nome, fill=COR_SUBTEXTO, font=font_sub)
+            draw.text((x_pos - 20, 600), dia_nome, fill=COR_SUBTEXTO, font=font_sub)
             if valor > 0:
                 draw.text((x_pos - 10, y_pos - 35), str(valor), fill=COR_DESTAQUE, font=font_main)
             x_pos += espaco
@@ -356,21 +333,19 @@ def gerar_imagem_historico(nome, historico):
         if len(pontos_grafico) > 1: draw.line(pontos_grafico, fill=COR_DESTAQUE, width=4)
         for p in pontos_grafico: draw.ellipse([p[0]-6, p[1]-6, p[0]+6, p[1]+6], fill=COR_CARD, outline=COR_DESTAQUE, width=3)
 
-    draw.rectangle([40, 650, 860, 1180], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 668), "ÚLTIMOS LANÇAMENTOS SALVOS NO BANCO", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 705, 860, 705], fill=COR_BORDA, width=1)
+    draw.rectangle([40, 670, 860, 1220], fill=COR_CARD, outline=COR_BORDA, width=2)
+    draw.text((60, 690), "ULTIMOS LANCAMENTOS SALVOS NO BANCO", fill=COR_TEXTO, font=font_main)
+    draw.line([40, 730, 860, 730], fill=COR_BORDA, width=2)
     
-    y_log = 725
-    ultimos_logs = historico_180[-9:]
+    y_log = 750
+    ultimos_logs = historico_180[-10:]
     for item in reversed(ultimos_logs):
         cor_log = COR_ALERTA if item['tipo'] == 'Improdutivo' else COR_SUBTEXTO
         draw.text((60, y_log), f">> {item['data']} | {item['tipo'].upper()}: +{item['quantidade']}", fill=cor_log, font=font_main)
         y_log += 45
 
-    # CARD DE DESTAQUE NO RODAPÉ
-    draw.rectangle([40, 1205, 860, 1285], fill='#f0f9ff', outline=COR_DESTAQUE, width=2)
-    draw.text((60, 1218), "📌 PAINEL DE AUTO-GESTÃO E PERFORMANCE - APOIO DE CAMPO", fill=COR_DESTAQUE, font=font_sub)
-    draw.text((60, 1252), "⚡ Desenvolvido por Agente de Campo para controle e otimização de metas.", fill=COR_SUBTEXTO, font=font_small)
+    draw.text((40, 1250), "⚠️ FERRAMENTA NAO OFICIAL - DESENVOLVIDA POR AGENTE DE CAMPO", fill=COR_SUBTEXTO, font=font_small)
+    draw.text((40, 1275), "⚡ SISTEMA INDEPENDENTE PARA CONTROLE DE PERFORMANCE", fill=COR_SUBTEXTO, font=font_small)
 
     buffer = io.BytesIO()
     img.save(buffer, format='PNG')
@@ -468,10 +443,8 @@ def start(message):
     nome = message.from_user.first_name
     inicializar_agente(str_id, nome)
     texto = (
-        f"🌐 *SISTEMA DE PERFORMANCE DE CAMPO*\n"
-        f"Bem-vindo(a), {nome}!\n\n"
-        "⚠️ *AVISO DE APOIO OPERACIONAL*\n"
-        "_Esta é uma ferramenta independente desenvolvida por Agente de Campo para auxílio no controle diário de produção e acompanhamento de metas._\n\n"
+        f"🌐 *MEU SISTEMA DE PERFORMANCE*\n"
+        f"Bem-vindo, {nome}.\n\n"
         "Selecione uma opção no menu abaixo para operar o sistema:"
     )
     bot.reply_to(message, texto, parse_mode="Markdown", reply_markup=menu_principal_keyboard())
@@ -492,9 +465,9 @@ def relatorio(message):
     pontos_total = (t['corte'] + t['religacao']) * PESO_SERVICO + (t['reaviso'] * PESO_REAVISO)
     m_f1, m_f2, m_f3 = 250, 300, 350
 
-    if pontos_total >= (m_f3 * PESO_SERVICO): status_msg = "PERFORMANCE MÁXIMA (NÍVEL 3)"
-    elif pontos_total >= (m_f2 * PESO_SERVICO): status_msg = "PERFORMANCE ELEVADA (NÍVEL 2)"
-    elif pontos_total >= (m_f1 * PESO_SERVICO): status_msg = "PERFORMANCE PADRÃO (NÍVEL 1)"
+    if pontos_total >= (m_f3 * PESO_SERVICO): status_msg = "PERFORMANCE MAXIMA (NIVEL 3)"
+    elif pontos_total >= (m_f2 * PESO_SERVICO): status_msg = "PERFORMANCE ELEVADA (NIVEL 2)"
+    elif pontos_total >= (m_f1 * PESO_SERVICO): status_msg = "PERFORMANCE PADRAO (NIVEL 1)"
     else: status_msg = "FRENTE OPERACIONAL (ABAIXO N1)"
 
     bot.send_chat_action(message.chat.id, 'upload_photo')
