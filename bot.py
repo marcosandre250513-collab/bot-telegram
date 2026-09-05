@@ -16,6 +16,13 @@ def agora_sp():
     """Retorna a data e hora atual no fuso oficial de São Paulo (UTC-3)."""
     return datetime.now(FUSO_SP)
 
+# --- MAPA DE MESES EM PORTUGUÊS ---
+MESES_NOME = {
+    1: 'JANEIRO', 2: 'FEVEREIRO', 3: 'MARÇO', 4: 'ABRIL',
+    5: 'MAIO', 6: 'JUNHO', 7: 'JULHO', 8: 'AGOSTO',
+    9: 'SETEMBRO', 10: 'OUTUBRO', 11: 'NOVEMBRO', 12: 'DEZEMBRO'
+}
+
 # --- CONFIGURAÇÃO DO SERVIDOR ---
 app = Flask('')
 
@@ -293,7 +300,7 @@ def menu_registro(message):
                  parse_mode="Markdown", reply_markup=teclado_registro_rapido())
 
 # ==========================================
-# RELATÓRIO FORMATADO COM ESTATÍSTICA DE REAVISO
+# RELATÓRIO FORMATADO COM MÊS DE PAGAMENTO
 # ==========================================
 @bot.message_handler(func=lambda m: m.text == '📊 Relatório Semanal' or m.text in ['/relatorio', '/status', '/prod', '/dds'])
 def relatorio(message):
@@ -312,6 +319,13 @@ def relatorio(message):
     data_inicio = segunda.strftime("%d/%m")
     data_fim = sabado.strftime("%d/%m")
     
+    # Cálculo do Mês de Pagamento (Produção Mês X -> Pagamento Mês X+2)
+    mes_producao = hoje.month
+    mes_pagamento_num = mes_producao + 2
+    if mes_pagamento_num > 12:
+        mes_pagamento_num -= 12
+    nome_mes_pagamento = MESES_NOME[mes_pagamento_num]
+
     cr = totais.get('corte', 0) + totais.get('religacao', 0)
     rv_maos = totais.get('reaviso_maos', 0)
     rv_outros = totais.get('reaviso_outros', 0)
@@ -366,10 +380,12 @@ def relatorio(message):
         f"• Faixa: {faixa_str}\n"
         f"• {falta_str}\n"
         f"💰 Bonificação parcial: R$ {bonif_str}\n\n"
-        f"🏆 Total da bonificação até agora: R$ {bonif_str}"
+        f"🏆 Total da bonificação até agora: R$ {bonif_str}\n\n"
+        f"🗓️ *MÊS DE PAGAMENTO DESTA PRODUÇÃO:*\n"
+        f"➡️ *{nome_mes_pagamento}*"
     )
     
-    bot.send_message(message.chat.id, msg_bonif)
+    bot.send_message(message.chat.id, msg_bonif, parse_mode="Markdown")
 
     dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
     linhas_tabela = []
