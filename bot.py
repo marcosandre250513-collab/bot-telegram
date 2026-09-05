@@ -5,10 +5,8 @@ from zoneinfo import ZoneInfo
 import math
 from flask import Flask
 from threading import Thread
-import io
 import json
 import os
-from PIL import Image, ImageDraw, ImageFont
 
 # --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
@@ -38,7 +36,6 @@ PESO_SERVICO = 13.64
 PESO_REAVISO = 7.80
 ARQUIVO_BANCO = 'banco_producao.json'
 
-# DIAS ÚTEIS E SÁBADO (SEG A SAB)
 DIAS_SEMANA = {
     0: 'SEG', 1: 'TERCA', 2: 'QUARTA',
     3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
@@ -65,29 +62,13 @@ def inicializar_agente(user_id, nome):
     if str_id not in usuarios:
         usuarios[str_id] = {
             'nome': nome,
-            'totais_semana': {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0},
+            'totais_semana': {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0},
             'producao_diaria': {
-                dia: {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0} for dia in DIAS_SEMANA.values()
+                dia: {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0} for dia in DIAS_SEMANA.values()
             },
             'historico_permanente': []
         }
         salvar_banco(usuarios)
-
-# --- BUSCADOR DE FONTES ---
-def get_font(size):
-    try:
-        return ImageFont.truetype("/system/fonts/Roboto-Regular.ttf", size)
-    except:
-        try:
-            return ImageFont.truetype("DejaVuSans.ttf", size)
-        except:
-            try:
-                return ImageFont.truetype("arial.ttf", size)
-            except:
-                try:
-                    return ImageFont.load_default(size=size)
-                except:
-                    return ImageFont.load_default()
 
 # ==========================================
 # MENUS E TECLADOS INTERATIVOS
@@ -135,224 +116,6 @@ def teclado_confirmacao_zerar():
     return markup
 
 # ==========================================
-# GERADOR DE IMAGEM: RELATÓRIO DA SEMANA
-# ==========================================
-def gerar_imagem_relatorio(nome, totais, dias, pontos_total, status_msg):
-    img = Image.new('RGB', (900, 1500), color='#0f172a')
-    draw = ImageDraw.Draw(img)
-    
-    font_title = get_font(32)
-    font_sub = get_font(22)
-    font_main = get_font(24)
-    font_small = get_font(16)
-
-    COR_FUNDO = '#0f172a'
-    COR_CARD = '#1e293b'
-    COR_BORDA = '#334155'
-    COR_TEXTO = '#f1f5f9'
-    COR_SUBTEXTO = '#94a3b8'
-    COR_DESTAQUE = '#38bdf8' 
-    COR_ALERTA = '#f87171'   
-
-    # CABEÇALHO
-    draw.rectangle([0, 0, 900, 130], fill='#020617')
-    draw.text((40, 30), "MINHA PERFORMANCE", fill=COR_TEXTO, font=font_title)
-    
-    hoje = agora_sp()
-    data_emissao = hoje.strftime("%d/%m/%Y - %H:%M:%S")
-    draw.text((40, 80), f"EMISSAO: {data_emissao} | AGENTE: {nome.upper()}", fill=COR_DESTAQUE, font=font_sub)
-
-    # CARD STATUS ATUAL (LIMPO E COM BADGE DE APOIO)
-    draw.rectangle([40, 160, 860, 260], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 180), f"STATUS ATUAL: {status_msg}", fill=COR_DESTAQUE, font=font_main)
-    draw.text((60, 218), "📌 PAINEL INDEPENDENTE DE APOIO OPERACIONAL", fill=COR_SUBTEXTO, font=font_sub)
-
-    # CARD DETALHAMENTO
-    draw.rectangle([40, 290, 860, 680], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 310), "DETALHAMENTO DA PRODUCAO SEMANAL", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 350, 860, 350], fill=COR_BORDA, width=2)
-
-    x_dia, x_corte, x_rel, x_rea, x_imp, x_tot = 60, 210, 330, 460, 600, 740
-    draw.text((x_dia, 370), "DIA (DATA)", fill=COR_SUBTEXTO, font=font_main)
-    draw.text((x_corte, 370), "CORTE", fill=COR_SUBTEXTO, font=font_main)
-    draw.text((x_rel, 370), "RELIG", fill=COR_SUBTEXTO, font=font_main)
-    draw.text((x_rea, 370), "REAVISO", fill=COR_SUBTEXTO, font=font_main)
-    draw.text((x_imp, 370), "IMP.", fill=COR_ALERTA, font=font_main)
-    draw.text((x_tot, 370), "TOTAL", fill=COR_DESTAQUE, font=font_main)
-    draw.line([40, 410, 860, 410], fill=COR_BORDA, width=2)
-
-    y = 430
-    valores_dias = []
-    
-    segunda_feira = hoje - timedelta(days=hoje.weekday())
-    dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
-    for idx, dia in enumerate(dias_ordem):
-        d = dias.get(dia, {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0})
-        total_prod = d['corte'] + d['religacao'] + d['reaviso']
-        
-        data_dia = (segunda_feira + timedelta(days=idx)).strftime("%d/%m")
-        nome_exibicao = f"{dia[:3]} {data_dia}"
-        valores_dias.append((nome_exibicao, total_prod))
-        
-        draw.text((x_dia, y), nome_exibicao, fill=COR_TEXTO, font=font_main)
-        draw.text((x_corte, y), f"{d['corte']}", fill=COR_TEXTO, font=font_main)
-        draw.text((x_rel, y), f"{d['religacao']}", fill=COR_TEXTO, font=font_main)
-        draw.text((x_rea, y), f"{d['reaviso']}", fill=COR_TEXTO, font=font_main)
-        draw.text((x_imp, y), f"{d['improdutivo']}", fill=COR_ALERTA, font=font_main)
-        draw.text((x_tot, y), f"{total_prod}", fill=COR_DESTAQUE, font=font_main)
-        y += 40  
-
-    # CARD 2: GRÁFICO DE COLUNAS
-    draw.rectangle([40, 710, 860, 950], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 730), "DESEMPENHO DIARIO (COLUNAS)", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 770, 860, 770], fill=COR_BORDA, width=2)
-
-    max_valor = max([v[1] for v in valores_dias] + [1])
-    x_pos = 100
-    espaco = 130
-    y_base = 900
-
-    for dia_nome, valor in valores_dias:
-        altura = (valor / max_valor) * 100 if max_valor > 0 else 0
-        x1 = x_pos - 25
-        x2 = x_pos + 25
-        y1 = y_base - altura
-        y2 = y_base
-        
-        draw.rectangle([x1, y1, x2, y2], fill=COR_DESTAQUE, outline=COR_BORDA, width=1)
-        draw.text((x_pos - 28, 912), dia_nome, fill=COR_SUBTEXTO, font=font_small)
-        
-        if valor > 0:
-            draw.text((x_pos - 12, y1 - 25), str(valor), fill=COR_TEXTO, font=font_main)
-            
-        x_pos += espaco
-
-    # CARD 3: STATUS DAS FAIXAS
-    draw.rectangle([40, 980, 860, 1380], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 1000), "STATUS DAS FAIXAS E PROGRESSAO DE METAS", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 1040, 860, 1040], fill=COR_BORDA, width=2)
-
-    hoje_idx = hoje.weekday()
-    dias_restantes = max(1, 6 - hoje_idx)
-
-    def text_meta(meta_qnt):
-        meta_pontos = meta_qnt * PESO_SERVICO
-        falta_pontos = meta_pontos - pontos_total
-        if falta_pontos <= 0: 
-            return "META ATINGIDA OK"
-            
-        faltam_servicos = math.ceil(falta_pontos / PESO_SERVICO)
-        faltam_reavisos = math.ceil(falta_pontos / PESO_REAVISO)
-        media_servicos = math.ceil(faltam_servicos / dias_restantes)
-        
-        return f"Faltam {faltam_servicos} Servicos ({media_servicos}/dia) ou {faltam_reavisos} Reavisos"
-
-    total_servicos_brutos = totais['corte'] + totais['religacao'] + totais['reaviso']
-    draw.text((60, 1060), f"VOLUME PRODUTIVO TOTAL: {total_servicos_brutos} Servicos", fill=COR_TEXTO, font=font_main)
-    draw.text((60, 1095), f"VOLUME IMPRODUTIVO TOTAL: {totais['improdutivo']} Servicos", fill=COR_ALERTA, font=font_main)
-
-    m_f1, m_f2, m_f3 = 250, 300, 350
-    faixas = [(1, m_f1, "#f59e0b"), (2, m_f2, "#8b5cf6"), (3, m_f3, "#10b981")]
-    y_faixa = 1150
-    for num, meta_qnt, cor in faixas:
-        meta_pontos = meta_qnt * PESO_SERVICO
-        pct = min(1.0, pontos_total / meta_pontos) if meta_pontos > 0 else 0
-        draw.text((60, y_faixa), f"FAIXA {num}: {text_meta(meta_qnt)} [{int(pct * 100)}%]", fill=COR_TEXTO, font=font_main)
-        draw.rectangle([60, y_faixa + 35, 840, y_faixa + 50], fill=COR_FUNDO, outline=COR_BORDA, width=1)
-        if pct > 0: 
-            draw.rectangle([60, y_faixa + 35, 60 + (780 * pct), y_faixa + 50], fill=cor)
-        y_faixa += 75
-
-    # RODAPÉ COM AVISO DE USO PESSOAL / CRIADO POR AGENTE DE CAMPO
-    draw.text((40, 1415), "⚠️ FERRAMENTA NAO OFICIAL - USO PESSOAL E INDEPENDENTE", fill=COR_SUBTEXTO, font=font_small)
-    draw.text((40, 1440), "⚡ Criado por Agente de Campo para auxilio e controle de performance.", fill=COR_SUBTEXTO, font=font_small)
-
-    buffer = io.BytesIO()
-    img.save(buffer, format='PNG')
-    buffer.seek(0)
-    return buffer
-
-# ==========================================
-# GERADOR DE IMAGEM: LOG HISTÓRICO (ÚLTIMOS 180)
-# ==========================================
-def gerar_imagem_historico(nome, historico):
-    img = Image.new('RGB', (900, 1300), color='#0f172a')
-    draw = ImageDraw.Draw(img)
-    
-    font_title = get_font(32)
-    font_sub = get_font(22)
-    font_main = get_font(26)
-    font_small = get_font(16)
-
-    COR_FUNDO, COR_CARD, COR_BORDA = '#0f172a', '#1e293b', '#334155'
-    COR_TEXTO, COR_SUBTEXTO, COR_DESTAQUE = '#f1f5f9', '#94a3b8', '#38bdf8' 
-    COR_ALERTA = '#f87171'
-
-    draw.rectangle([0, 0, 900, 130], fill='#020617')
-    draw.text((40, 30), "AUDITORIA DE DADOS - LOG PERMANENTE", fill=COR_TEXTO, font=font_title)
-    draw.text((40, 80), f"AGENTE: {nome.upper()} | USO PESSOAL", fill=COR_DESTAQUE, font=font_sub)
-
-    historico_180 = historico[-180:]
-    total_geral = sum(item['quantidade'] for item in historico_180 if item['tipo'] != 'Improdutivo')
-    
-    agrupado = {}
-    for item in historico_180:
-        data_dia = item['data'].split()[0][:5] 
-        if data_dia not in agrupado: agrupado[data_dia] = 0
-        if item['tipo'] in ['Corte', 'Religação', 'Reaviso']:
-            agrupado[data_dia] += item['quantidade']
-            
-    ultimos_dias = list(agrupado.keys())[-7:]
-    valores_grafico = [(d, agrupado[d]) for d in ultimos_dias]
-
-    draw.rectangle([40, 160, 860, 260], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 180), f"VOLUME HISTORICO TOTAL: {total_geral} servicos (Ativos)", fill=COR_DESTAQUE, font=font_main)
-    draw.text((60, 215), f"TOTAL DE EVENTOS: {len(historico_180)} registros (ultimos 180)", fill=COR_TEXTO, font=font_main)
-
-    draw.rectangle([40, 290, 860, 640], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 310), "CURVA DE EVOLUCAO HISTORICA (Ultimos dias ativos)", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 350, 860, 350], fill=COR_BORDA, width=2)
-
-    if valores_grafico:
-        max_valor = max([v[1] for v in valores_grafico] + [1])
-        pontos_grafico = []
-        largura_disponivel = 760
-        espaco = largura_disponivel // max(len(valores_grafico), 2)
-        x_pos = 100
-        
-        for dia_nome, valor in valores_grafico:
-            altura = (valor / max_valor) * 180 if max_valor > 0 else 0
-            y_pos = 580 - altura
-            pontos_grafico.append((x_pos, y_pos))
-            
-            draw.text((x_pos - 20, 600), dia_nome, fill=COR_SUBTEXTO, font=font_sub)
-            if valor > 0:
-                draw.text((x_pos - 10, y_pos - 35), str(valor), fill=COR_DESTAQUE, font=font_main)
-            x_pos += espaco
-
-        if len(pontos_grafico) > 1: draw.line(pontos_grafico, fill=COR_DESTAQUE, width=4)
-        for p in pontos_grafico: draw.ellipse([p[0]-6, p[1]-6, p[0]+6, p[1]+6], fill=COR_CARD, outline=COR_DESTAQUE, width=3)
-
-    draw.rectangle([40, 670, 860, 1220], fill=COR_CARD, outline=COR_BORDA, width=2)
-    draw.text((60, 690), "ULTIMOS LANCAMENTOS SALVOS NO BANCO", fill=COR_TEXTO, font=font_main)
-    draw.line([40, 730, 860, 730], fill=COR_BORDA, width=2)
-    
-    y_log = 750
-    ultimos_logs = historico_180[-10:]
-    for item in reversed(ultimos_logs):
-        cor_log = COR_ALERTA if item['tipo'] == 'Improdutivo' else COR_SUBTEXTO
-        draw.text((60, y_log), f">> {item['data']} | {item['tipo'].upper()}: +{item['quantidade']}", fill=cor_log, font=font_main)
-        y_log += 45
-
-    draw.text((40, 1250), "⚠️ FERRAMENTA NAO OFICIAL - DESENVOLVIDA POR AGENTE DE CAMPO", fill=COR_SUBTEXTO, font=font_small)
-    draw.text((40, 1275), "⚡ SISTEMA INDEPENDENTE PARA CONTROLE DE PERFORMANCE", fill=COR_SUBTEXTO, font=font_small)
-
-    buffer = io.BytesIO()
-    img.save(buffer, format='PNG')
-    buffer.seek(0)
-    return buffer
-
-# ==========================================
 # HANDLERS DE RESPOSTA (NEXT STEP HANDLERS)
 # ==========================================
 def receber_qnt_corte(message):
@@ -374,7 +137,7 @@ def receber_qnt_religacao(message):
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
 # ==========================================
-# 🤫 COMANDO OCULTO: ADICIONAR CORTE EM DIA ESPECÍFICO
+# COMANDO DE AJUSTE MANUAL
 # ==========================================
 @bot.message_handler(commands=['addcorte', 'cortedia'])
 def add_corte_dia_especifico(message):
@@ -454,39 +217,107 @@ def menu_registro(message):
     bot.reply_to(message, "⚡ *REGISTRO RÁPIDO DE CAMPO*\nToque nos botões para lançar sua produção:", 
                  parse_mode="Markdown", reply_markup=teclado_registro_rapido())
 
-@bot.message_handler(func=lambda m: m.text == '📊 Relatório Semanal' or m.text in ['/relatorio', '/status'])
+# ==========================================
+# RELATÓRIO FORMATADO IGUAL ÀS IMAGENS
+# ==========================================
+@bot.message_handler(func=lambda m: m.text == '📊 Relatório Semanal' or m.text in ['/relatorio', '/status', '/prod', '/dds'])
 def relatorio(message):
     str_id = str(message.from_user.id)
     nome = message.from_user.first_name
     inicializar_agente(str_id, nome)
     
     dados = usuarios[str_id]
-    t, dias = dados['totais_semana'], dados['producao_diaria']
-    pontos_total = (t['corte'] + t['religacao']) * PESO_SERVICO + (t['reaviso'] * PESO_REAVISO)
+    totais = dados['totais_semana']
+    dias = dados['producao_diaria']
+    
+    hoje = agora_sp()
+    segunda = hoje - timedelta(days=hoje.weekday())
+    sabado = segunda + timedelta(days=5)
+    
+    data_inicio = segunda.strftime("%d/%m")
+    data_fim = sabado.strftime("%d/%m")
+    
+    cr = totais.get('corte', 0) + totais.get('religacao', 0)
+    rv = totais.get('reaviso', 0)
+    en = totais.get('improdutivo', 0)
+    ng = totais.get('negociacao', 0)
+    
+    pontos = (cr * PESO_SERVICO) + (rv * PESO_REAVISO)
+    
     m_f1, m_f2, m_f3 = 250, 300, 350
+    m_f1_pts, m_f2_pts = m_f1 * PESO_SERVICO, m_f2 * PESO_SERVICO
+    
+    if pontos >= (m_f3 * PESO_SERVICO):
+        faixa_str = "Faixa 3"
+        falta_str = "Meta máxima atingida!"
+        bonificacao = 300.00
+    elif pontos >= m_f2_pts:
+        faixa_str = "Faixa 2"
+        falta_str = "Atingiu a Faixa 2"
+        bonificacao = 200.00
+    elif pontos >= m_f1_pts:
+        faixa_str = "Faixa 1"
+        falta_pts = m_f2_pts - pontos
+        faltam_c = math.ceil(falta_pts / PESO_SERVICO)
+        faltam_r = math.ceil(falta_pts / PESO_REAVISO)
+        falta_str = f"Faltaram {faltam_c} Cortes ou {faltam_r} Reavisos para Faixa 2"
+        bonificacao = 150.00
+    else:
+        faixa_str = "Nenhuma Faixa"
+        falta_pts = m_f1_pts - pontos
+        faltam_c = math.ceil(falta_pts / PESO_SERVICO)
+        faltam_r = math.ceil(falta_pts / PESO_REAVISO)
+        falta_str = f"Faltam {faltam_c} Cortes ou {faltam_r} Reavisos para Faixa 1"
+        bonificacao = 0.00
 
-    if pontos_total >= (m_f3 * PESO_SERVICO): status_msg = "PERFORMANCE MAXIMA (NIVEL 3)"
-    elif pontos_total >= (m_f2 * PESO_SERVICO): status_msg = "PERFORMANCE ELEVADA (NIVEL 2)"
-    elif pontos_total >= (m_f1 * PESO_SERVICO): status_msg = "PERFORMANCE PADRAO (NIVEL 1)"
-    else: status_msg = "FRENTE OPERACIONAL (ABAIXO N1)"
+    # MENSAGEM 1: RESUMO DE BONIFICAÇÃO
+    msg_bonif = (
+        f"👋 Olá {nome.upper()}, segue abaixo a sua parcial da bonificação semanal:\n\n"
+        f"📅 Semana 1 ({data_inicio} a {data_fim}):\n"
+        f"• Cortes/Religações: {cr}\n"
+        f"• Reavisos: {rv}\n"
+        f"• Entregas: {en}\n"
+        f"• Negociações: {ng}\n"
+        f"• Faixa: {faixa_str}\n"
+        f"• {falta_str}\n"
+        f"💰 Bonificação parcial: R$ {bonificacao:,.2f}".replace('.', ',') + "\n\n"
+        f"🏆 Total da bonificação até agora: R$ {bonificacao:,.2f}".replace('.', ',')
+    )
+    
+    bot.send_message(message.chat.id, msg_bonif)
 
-    bot.send_chat_action(message.chat.id, 'upload_photo')
-    bot.send_photo(message.chat.id, photo=gerar_imagem_relatorio(nome, t, dias, pontos_total, status_msg), 
-                   caption="📈 *DASHBOARD DA SEMANA*", parse_mode="Markdown")
+    # MENSAGEM 2: DETALHAMENTO DIÁRIO EM TABELA
+    dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
+    linhas_tabela = []
+    
+    for idx, dia_chave in enumerate(dias_ordem):
+        dt = (segunda + timedelta(days=idx)).strftime("%d/%m/%Y")
+        d_dados = dias.get(dia_chave, {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0})
+        
+        d_cr = d_dados.get('corte', 0) + d_dados.get('religacao', 0)
+        d_rv = d_dados.get('reaviso', 0)
+        d_en = d_dados.get('improdutivo', 0)
+        d_ng = d_dados.get('negociacao', 0)
+        
+        linhas_tabela.append(f"{dt} | {d_cr:2d} | {d_rv:2d} | {d_en:2d} | {d_ng:2d}")
 
-@bot.message_handler(commands=['historico'])
-def ver_historico(message):
-    str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
+    tabela_formatada = "\n".join(linhas_tabela)
 
-    historico = usuarios[str_id].get('historico_permanente', [])
-    if not historico:
-        return bot.reply_to(message, "📂 *LOG VAZIO.* Nenhum registro salvo no banco.", parse_mode="Markdown")
+    msg_diario = (
+        "📅 *Serviços executados por dia:*\n\n"
+        "📌 *Legenda:*\n"
+        "CR = Cortes/Religações\n"
+        "RV = Reavisos\n"
+        "EN = Entregas\n"
+        "NG = Negociações\n\n"
+        "```\n"
+        "Data       | CR | RV | EN | NG\n"
+        "--------------------------------\n"
+        f"{tabela_formatada}\n"
+        "```"
+    )
 
-    bot.send_chat_action(message.chat.id, 'upload_photo')
-    bot.send_photo(message.chat.id, photo=gerar_imagem_historico(nome, historico), 
-                   caption="🗄️ *AUDITORIA DE DADOS - LOG PERMANENTE*", parse_mode="Markdown")
+    bot.send_message(message.chat.id, msg_diario, parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == '🔄 Resetar Semana' or m.text == '/resetar')
 def solicitar_reset_semana(message):
@@ -536,34 +367,6 @@ def registrar_servico_manual(message):
     except:
         bot.reply_to(message, f"⚠️ *SINTAXE INCORRETA*\nEx: `{comando} 10`", parse_mode="Markdown")
 
-@bot.message_handler(commands=['retira', 'remover'])
-def retirar_servico(message):
-    str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
-
-    try:
-        partes = message.text.split()
-        if len(partes) != 3: return bot.reply_to(message, "⚠️ Ex: `/retira corte 3`", parse_mode="Markdown")
-
-        tipo_input, quantidade = partes[1].lower(), int(partes[2])
-        dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
-
-        if tipo_input in ['corte']:
-            qnt_atual_dia = usuarios[str_id]['producao_diaria'][dia_nome]['corte']
-            qnt_atual_total = usuarios[str_id]['totais_semana']['corte']
-            real_remover = min(quantidade, qnt_atual_total)
-
-            usuarios[str_id]['producao_diaria'][dia_nome]['corte'] = max(0, qnt_atual_dia - real_remover)
-            usuarios[str_id]['totais_semana']['corte'] = max(0, qnt_atual_total - real_remover)
-            usuarios[str_id]['producao_diaria'][dia_nome]['improdutivo'] += real_remover
-            usuarios[str_id]['totais_semana']['improdutivo'] += real_remover
-            salvar_banco(usuarios)
-
-            bot.reply_to(message, f"🔄 *CONVERSÃO EXECUTADA*\n-{real_remover} Corte(s)\n+{real_remover} Improdutivo(s)", parse_mode="Markdown")
-    except ValueError:
-        bot.reply_to(message, "⚠️ Valores devem ser inteiros.", parse_mode="Markdown")
-
 # ==========================================
 # PROCESSAMENTO DE BOTÕES E CALLBACKS
 # ==========================================
@@ -600,40 +403,10 @@ def callback_handler(call):
         processar_lancamento(user_id, 'religacao', 'Religação', 1)
         bot.answer_callback_query(call.id, "✅ +1 Religação registrada!", show_alert=False)
 
-    elif call.data == 'convert_corte_1':
-        dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
-        qnt_atual_dia = usuarios[user_id]['producao_diaria'][dia_nome]['corte']
-        qnt_atual_total = usuarios[user_id]['totais_semana']['corte']
-        
-        if qnt_atual_total > 0:
-            usuarios[user_id]['producao_diaria'][dia_nome]['corte'] = max(0, qnt_atual_dia - 1)
-            usuarios[user_id]['totais_semana']['corte'] = max(0, qnt_atual_total - 1)
-            usuarios[user_id]['producao_diaria'][dia_nome]['improdutivo'] += 1
-            usuarios[user_id]['totais_semana']['improdutivo'] += 1
-            salvar_banco(usuarios)
-            bot.answer_callback_query(call.id, "🔄 1 Corte convertido em Improdutivo!", show_alert=False)
-        else:
-            bot.answer_callback_query(call.id, "⚠️ Você não possui cortes nesta semana para converter!", show_alert=True)
-
-    elif call.data == 'convert_religacao_1':
-        dia_nome = DIAS_SEMANA.get(agora_sp().weekday(), 'SAB')
-        qnt_atual_dia = usuarios[user_id]['producao_diaria'][dia_nome]['religacao']
-        qnt_atual_total = usuarios[user_id]['totais_semana']['religacao']
-        
-        if qnt_atual_total > 0:
-            usuarios[user_id]['producao_diaria'][dia_nome]['religacao'] = max(0, qnt_atual_dia - 1)
-            usuarios[user_id]['totais_semana']['religacao'] = max(0, qnt_atual_total - 1)
-            usuarios[user_id]['producao_diaria'][dia_nome]['improdutivo'] += 1
-            usuarios[user_id]['totais_semana']['improdutivo'] += 1
-            salvar_banco(usuarios)
-            bot.answer_callback_query(call.id, "🔄 1 Religação convertida em Improdutivo!", show_alert=False)
-        else:
-            bot.answer_callback_query(call.id, "⚠️ Você não possui religações nesta semana para converter!", show_alert=True)
-
     elif call.data == 'confirm_reset_semana':
-        usuarios[user_id]['totais_semana'] = {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0}
+        usuarios[user_id]['totais_semana'] = {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0}
         for dia in DIAS_SEMANA.values():
-            usuarios[user_id]['producao_diaria'][dia] = {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0}
+            usuarios[user_id]['producao_diaria'][dia] = {'corte': 0, 'religacao': 0, 'reaviso': 0, 'improdutivo': 0, 'negociacao': 0}
         salvar_banco(usuarios)
         
         bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO!*\nA contagem da semana foi zerada com sucesso.", 
