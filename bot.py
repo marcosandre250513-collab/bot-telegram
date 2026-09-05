@@ -5,9 +5,9 @@ from zoneinfo import ZoneInfo
 import math
 from flask import Flask
 from threading import Thread
-import json
 import os
 import time
+import psycopg2
 
 # --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
@@ -23,7 +23,12 @@ MESES_NOME = {
     9: 'SETEMBRO', 10: 'OUTUBRO', 11: 'NOVEMBRO', 12: 'DEZEMBRO'
 }
 
-# --- CONFIGURAÇÃO DO SERVIDOR ---
+DIAS_SEMANA = {
+    0: 'SEG', 1: 'TERCA', 2: 'QUARTA',
+    3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
+}
+
+# --- CONFIGURAÇÃO DO SERVIDOR WEB ---
 app = Flask('')
 
 @app.route('/')
@@ -35,73 +40,116 @@ def run():
 
 t = Thread(target=run)
 t.start()
-# --------------------------------
 
+# --- CONFIGURAÇÃO DO BOT E BANCO POSTGRESQL ---
 TOKEN = '8804109455:AAHPqPuDSp2cB_VANRG4EsJOevrw9sydRf8'
 bot = telebot.TeleBot(TOKEN)
 
 PESO_SERVICO = 13.64
 PESO_REAVISO = 7.80
-ARQUIVO_BANCO = 'banco_producao.json'
 
-DIAS_SEMANA = {
-    0: 'SEG', 1: 'TERCA', 2: 'QUARTA',
-    3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
-}
+def get_db_connection():
+    url = os.environ.get('DATABASE_URL')
+    if not url:
+        raise ValueError("A variável DATABASE_URL não foi encontrada. Verifique se o PostgreSQL foi adicionado no Railway.")
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return psycopg2.connect(url, sslmode='require')
 
-# --- FUNÇÕES DE BANCO DE DADOS PERMANENTE ---
-def carregar_banco():
-    if os.path.exists(ARQUIVO_BANCO):
-        try:
-            with open(ARQUIVO_BANCO, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def salvar_banco(dados):
-    with open(ARQUIVO_BANCO, 'w', encoding='utf-8') as f:
-        json.dump(dados, f, ensure_ascii=False, indent=4)
-
-usuarios = carregar_banco()
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            user_id VARCHAR(50) PRIMARY KEY,
+            nome VARCHAR(100)
+        );
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS lancamentos (
+            id SERIAL PRIMARY KEY,
+            user_id VARCHAR(50) REFERENCES usuarios(user_id),
+            data_registro TIMESTAMP,
+            dia_semana VARCHAR(10),
+            tipo VARCHAR(50),
+            quantidade INT,
+            semana_ativa BOOLEAN DEFAULT TRUE
+        );
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def inicializar_agente(user_id, nome):
     str_id = str(user_id)
-    if str_id not in usuarios:
-        usuarios[str_id] = {
-            'nome': nome,
-            'totais_semana': {
-                'corte': 0, 
-                'religacao': 0, 
-                'reaviso_maos': 0, 
-                'reaviso_outros': 0, 
-                'improdutivo': 0, 
-                'negociacao': 0
-            },
-            'producao_diaria': {
-                dia: {
-                    'corte': 0, 
-                    'religacao': 0, 
-                    'reaviso_maos': 0, 
-                    'reaviso_outros': 0, 
-                    'improdutivo': 0, 
-                    'negociacao': 0
-                } for dia in DIAS_SEMANA.values()
-            },
-            'historico_permanente': []
-        }
-        salvar_banco(usuarios)
-    else:
-        # Retrocompatibilidade
-        t = usuarios[str_id]['totais_semana']
-        t.setdefault('reaviso_maos', t.pop('reaviso', 0))
-        t.setdefault('reaviso_outros', 0)
-        t.setdefault('negociacao', 0)
-        for dia in DIAS_SEMANA.values():
-            d = usuarios[str_id]['producao_diaria'].setdefault(dia, {})
-            d.setdefault('reaviso_maos', d.pop('reaviso', 0))
-            d.setdefault('reaviso_outros', 0)
-            d.setdefault('negociacao', 0)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        INSERT INTO usuarios (user_id, nome)
+        VALUES (%s, %s)
+        ON CONFLICT (user_id) DO UPDATE SET nome = EXCLUDED.nome;
+    ''', (str_id, nome))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def processar_lancamento(user_id, tipo_id, quantidade, dia_especifico=None):
+    str_id = str(user_id)
+    agora = agora_sp()
+    dia_nome = dia_especifico if dia_especifico else DIAS_SEMANA.get(agora.weekday(), 'SAB')
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        INSERT INTO lancamentos (user_id, data_registro, dia_semana, tipo, quantidade, semana_ativa)
+        VALUES (%s, %s, %s, %s, %s, TRUE)
+    ''', (str_id, agora, dia_nome, tipo_id, quantidade))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def obter_resumo_semana(user_id):
+    str_id = str(user_id)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute('''
+        SELECT tipo, SUM(quantidade) 
+        FROM lancamentos 
+        WHERE user_id = %s AND semana_ativa = TRUE
+        GROUP BY tipo;
+    ''', (str_id,))
+    rows = cur.fetchall()
+    
+    totais = {
+        'corte': 0, 'religacao': 0, 'reaviso_maos': 0, 
+        'reaviso_outros': 0, 'improdutivo': 0, 'negociacao': 0
+    }
+    for tipo, soma in rows:
+        if tipo in totais:
+            totais[tipo] = int(soma or 0)
+
+    cur.execute('''
+        SELECT dia_semana, tipo, SUM(quantidade)
+        FROM lancamentos
+        WHERE user_id = %s AND semana_ativa = TRUE
+        GROUP BY dia_semana, tipo;
+    ''', (str_id,))
+    rows_diarios = cur.fetchall()
+    
+    producao_diaria = {
+        dia: {
+            'corte': 0, 'religacao': 0, 'reaviso_maos': 0, 
+            'reaviso_outros': 0, 'improdutivo': 0, 'negociacao': 0
+        } for dia in DIAS_SEMANA.values()
+    }
+    for dia, tipo, soma in rows_diarios:
+        if dia in producao_diaria and tipo in producao_diaria[dia]:
+            producao_diaria[dia][tipo] = int(soma or 0)
+
+    cur.close()
+    conn.close()
+    return totais, producao_diaria
 
 # ==========================================
 # MENUS E TECLADOS INTERATIVOS
@@ -135,10 +183,6 @@ def teclado_registro_rapido():
         types.InlineKeyboardButton("✋ Reaviso Mãos (Qnt)", callback_data="prompt_reaviso_maos"),
         types.InlineKeyboardButton("📬 Reaviso Outros (Qnt)", callback_data="prompt_reaviso_outros")
     )
-    markup.add(
-        types.InlineKeyboardButton("🔄 Corte -> Improdutivo", callback_data="convert_corte_1"),
-        types.InlineKeyboardButton("🔄 Religue -> Improdutivo", callback_data="convert_religacao_1")
-    )
     return markup
 
 def teclado_confirmacao_reset_semana():
@@ -164,7 +208,7 @@ def receber_qnt_corte(message):
     try:
         qnt = int(message.text)
         user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'corte', 'Corte', qnt)
+        processar_lancamento(user_id, 'corte', qnt)
         bot.reply_to(message, f"✅ *+ {qnt} Corte(s)* adicionado(s) com sucesso!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
@@ -173,7 +217,7 @@ def receber_qnt_religacao(message):
     try:
         qnt = int(message.text)
         user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'religacao', 'Religação', qnt)
+        processar_lancamento(user_id, 'religacao', qnt)
         bot.reply_to(message, f"✅ *+ {qnt} Religação(ões)* adicionada(s) com sucesso!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
@@ -182,7 +226,7 @@ def receber_qnt_reaviso_maos(message):
     try:
         qnt = int(message.text)
         user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'reaviso_maos', 'Reaviso (Em Mãos)', qnt)
+        processar_lancamento(user_id, 'reaviso_maos', qnt)
         bot.reply_to(message, f"✅ *+ {qnt} Reaviso(s) Em Mãos* adicionado(s)!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
@@ -191,7 +235,7 @@ def receber_qnt_reaviso_outros(message):
     try:
         qnt = int(message.text)
         user_id = str(message.from_user.id)
-        processar_lancamento(user_id, 'reaviso_outros', 'Reaviso (Outros)', qnt)
+        processar_lancamento(user_id, 'reaviso_outros', qnt)
         bot.reply_to(message, f"✅ *+ {qnt} Reaviso(s) Outros* adicionado(s)!", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
@@ -234,19 +278,8 @@ def add_corte_dia_especifico(message):
             )
 
         dia_chave = mapa_dias[dia_input]
-        agora = agora_sp()
-        data_str = agora.strftime("%d/%m/%Y %H:%M")
-
-        usuarios[str_id]['producao_diaria'][dia_chave]['corte'] += quantidade
-        usuarios[str_id]['totais_semana']['corte'] += quantidade
-        usuarios[str_id]['historico_permanente'].append({
-            'data': data_str,
-            'dia': dia_chave,
-            'tipo': 'Corte',
-            'quantidade': quantidade
-        })
-
-        salvar_banco(usuarios)
+        processar_lancamento(str_id, 'corte', quantidade, dia_especifico=dia_chave)
+        
         bot.reply_to(
             message, 
             f"🤫 *AJUSTE MANUAL REALIZADO*\n+{quantidade} Corte(s) adicionados em *{dia_chave}* com sucesso!", 
@@ -277,8 +310,7 @@ def listar_comandos(message):
         "• `/reaoutros [qnt]` - Registra reavisos outros (Ex: `/reaoutros 8`)\n"
         "• `/imp [qnt]` - Registra improdutivos/entregas (Ex: `/imp 2`)\n\n"
         "⚙️ *Ajustes Específicos:*\n"
-        "• `/addcorte [dia] [qnt]` - Adiciona cortes em dia específico (Ex: `/addcorte seg 10`)\n"
-        "• `/retira corte [qnt]` - Converte cortes em improdutivos"
+        "• `/addcorte [dia] [qnt]` - Adiciona cortes em dia específico (Ex: `/addcorte seg 10`)"
     )
     bot.reply_to(message, texto, parse_mode="Markdown")
 
@@ -308,9 +340,7 @@ def relatorio(message):
     nome = message.from_user.first_name
     inicializar_agente(str_id, nome)
     
-    dados = usuarios[str_id]
-    totais = dados['totais_semana']
-    dias = dados['producao_diaria']
+    totais, dias = obter_resumo_semana(str_id)
     
     hoje = agora_sp()
     segunda = hoje - timedelta(days=hoje.weekday())
@@ -319,7 +349,6 @@ def relatorio(message):
     data_inicio = segunda.strftime("%d/%m")
     data_fim = sabado.strftime("%d/%m")
     
-    # Cálculo do Mês de Pagamento (Produção Mês X -> Pagamento Mês X+2)
     mes_producao = hoje.month
     mes_pagamento_num = mes_producao + 2
     if mes_pagamento_num > 12:
@@ -437,7 +466,7 @@ def registrar_servico_manual(message):
 
     try:
         quantidade = int(message.text.split()[1])
-        processar_lancamento(str_id, tipo_id, tipo_nome, quantidade)
+        processar_lancamento(str_id, tipo_id, quantidade)
         bot.reply_to(message, f"✅ *INPUT ACEITO*\nVolume processado: +{quantidade} {tipo_nome}(s)", parse_mode="Markdown")
     except:
         bot.reply_to(message, f"⚠️ *SINTAXE INCORRETA*\nEx: `{comando} 10`", parse_mode="Markdown")
@@ -469,18 +498,8 @@ def solicitar_zerar_historico(message):
     )
 
 # ==========================================
-# PROCESSAMENTO DE BOTÕES E CALLBACKS COM POP-UP / SOM
+# PROCESSAMENTO DE BOTÕES E CALLBACKS
 # ==========================================
-def processar_lancamento(user_id, tipo_id, tipo_nome, quantidade):
-    agora = agora_sp()
-    dia_nome = DIAS_SEMANA.get(agora.weekday(), 'SAB')
-    data_str = agora.strftime("%d/%m/%Y %H:%M")
-    
-    usuarios[user_id]['producao_diaria'][dia_nome][tipo_id] += quantidade
-    usuarios[user_id]['totais_semana'][tipo_id] += quantidade
-    usuarios[user_id]['historico_permanente'].append({'data': data_str, 'dia': dia_nome, 'tipo': tipo_nome, 'quantidade': quantidade})
-    salvar_banco(usuarios)
-
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = str(call.from_user.id)
@@ -507,30 +526,28 @@ def callback_handler(call):
         bot.answer_callback_query(call.id)
 
     elif call.data == 'add_corte_1':
-        processar_lancamento(user_id, 'corte', 'Corte', 1)
+        processar_lancamento(user_id, 'corte', 1)
         bot.answer_callback_query(call.id, "✂️ +1 Corte Registrado com Sucesso!", show_alert=True)
 
     elif call.data == 'add_religacao_1':
-        processar_lancamento(user_id, 'religacao', 'Religação', 1)
+        processar_lancamento(user_id, 'religacao', 1)
         bot.answer_callback_query(call.id, "🔌 +1 Religação Registrada com Sucesso!", show_alert=True)
 
     elif call.data == 'add_reaviso_maos_1':
-        processar_lancamento(user_id, 'reaviso_maos', 'Reaviso (Em Mãos)', 1)
+        processar_lancamento(user_id, 'reaviso_maos', 1)
         bot.answer_callback_query(call.id, "✋ +1 Reaviso (Em Mãos) Registrado!", show_alert=True)
 
     elif call.data == 'add_reaviso_outros_1':
-        processar_lancamento(user_id, 'reaviso_outros', 'Reaviso (Outros)', 1)
+        processar_lancamento(user_id, 'reaviso_outros', 1)
         bot.answer_callback_query(call.id, "📬 +1 Reaviso (Outros) Registrado!", show_alert=True)
 
     elif call.data == 'confirm_reset_semana':
-        usuarios[user_id]['totais_semana'] = {
-            'corte': 0, 'religacao': 0, 'reaviso_maos': 0, 'reaviso_outros': 0, 'improdutivo': 0, 'negociacao': 0
-        }
-        for dia in DIAS_SEMANA.values():
-            usuarios[user_id]['producao_diaria'][dia] = {
-                'corte': 0, 'religacao': 0, 'reaviso_maos': 0, 'reaviso_outros': 0, 'improdutivo': 0, 'negociacao': 0
-            }
-        salvar_banco(usuarios)
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE lancamentos SET semana_ativa = FALSE WHERE user_id = %s AND semana_ativa = TRUE;", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
         
         bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO!*\nA contagem da semana foi zerada com sucesso.", 
                               chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
@@ -542,8 +559,13 @@ def callback_handler(call):
         bot.answer_callback_query(call.id, "Cancelado!")
 
     elif call.data == 'confirm_zerar_hist':
-        usuarios[user_id]['historico_permanente'] = []
-        salvar_banco(usuarios)
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM lancamentos WHERE user_id = %s;", (user_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
         bot.edit_message_text("🗑️ *HISTÓRICO PERMANENTE ZERADO!*\nTodos os registros antigos foram apagados com sucesso.", 
                               chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Histórico apagado!", show_alert=True)
@@ -553,7 +575,10 @@ def callback_handler(call):
                               chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Cancelado!")
 
-# --- INICIALIZAÇÃO SEGURA DO BOT ---
+# --- INICIALIZAÇÃO DO BANCO E DO BOT ---
+print("Inicializando tabelas do PostgreSQL...")
+init_db()
+
 print("Limpando conexões anteriores e inicializando...")
 try:
     bot.remove_webhook()
@@ -561,5 +586,5 @@ try:
 except Exception as e:
     print(f"Aviso ao limpar webhook: {e}")
 
-print("Sistema Global Online. Aguardando conexão...")
+print("Sistema Global Online no PostgreSQL. Aguardando conexão...")
 bot.infinity_polling(skip_pending=True)
