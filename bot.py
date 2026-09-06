@@ -11,8 +11,7 @@ import time
 import psycopg2
 
 # --- CONFIGURAÇÃO DO ADMINISTRADOR DO BOT ---
-# Cole aqui o seu ID numérico do Telegram para você ser o administrador do sistema
-ADMIN_ID = os.environ.get('ADMIN_ID', '8581499778') 
+ADMIN_ID = os.environ.get('ADMIN_ID', 'SEU_TELEGRAM_ID_AQUI') 
 
 # --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
@@ -31,7 +30,7 @@ DIAS_SEMANA = {
     3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
 }
 
-# --- LISTA DE 105 FRASES MOTIVACIONAIS OPERACIONAIS (EQUATORIAL / CAMPO) ---
+# --- LISTA DE FRASES MOTIVACIONAIS OPERACIONAIS ---
 FRASES_MOTIVACIONAIS = [
     "Mais um pra conta na rua! 🚀",
     "Excelente atendimento e execução no cliente! 💪",
@@ -149,7 +148,7 @@ AVISO_INDEPENDENTE = (
     "servindo exclusivamente como um painel pessoal de acompanhamento."
 )
 
-# --- SERVIDOR WEB DE MANUTENÇÃO DE STATUS (RAILWAY) ---
+# --- SERVIDOR WEB DE MANUTENÇÃO DE STATUS ---
 app = Flask('')
 
 @app.route('/')
@@ -340,15 +339,20 @@ def obter_historico_mensal(user_id):
     conn.close()
     return resumo_meses
 
-# --- TECLADOS E INTERFACES (BOTÕES EXPANDIDOS PARA USO RÁPIDO NO CAMPO) ---
+# --- TECLADO PRINCIPAL (MENU GRANDÃO ATUALIZADO COM AÇÕES RÁPIDAS) ---
 def menu_principal_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=False, is_persistent=True, row_width=2)
+    
+    btn_religue = types.KeyboardButton('🔌 Religue +1')
+    btn_maos = types.KeyboardButton('✋ Reaviso em Mãos')
+    
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
     btn_mensal = types.KeyboardButton('📅 Histórico Mensal')
     btn_registrar = types.KeyboardButton('⚡ Registrar Produção')
     btn_comandos = types.KeyboardButton('📜 Comandos & Termos')
     btn_reset_semana = types.KeyboardButton('🔄 Resetar Semana')
     
+    markup.add(btn_religue, btn_maos)
     markup.add(btn_relatorio, btn_mensal)
     markup.add(btn_registrar, btn_comandos)
     markup.add(btn_reset_semana)
@@ -405,14 +409,36 @@ def receber_qnt_reaviso_outros(message):
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
-# --- HANDLERS DE COMANDOS DE TEXTO E MENUS ---
+# --- HANDLERS DAS AÇÕES RÁPIDAS DO MENU PRINCIPAL ---
+@bot.message_handler(func=lambda m: m.text == '🔌 Religue +1')
+def acao_religue_rapido(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
+    str_id = str(message.from_user.id)
+    inicializar_agente(str_id, message.from_user.first_name)
+    processar_lancamento(str_id, 'religacao', 1)
+    frase = random.choice(FRASES_MOTIVACIONAIS)
+    bot.reply_to(message, f"🔌 *+1 Religação* registrada com sucesso!\n\n💬 _{frase}_", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == '✋ Reaviso em Mãos')
+def acao_maos_rapido(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
+    str_id = str(message.from_user.id)
+    inicializar_agente(str_id, message.from_user.first_name)
+    converter_reaviso_para_maos(str_id, 1)
+    frase = random.choice(FRASES_MOTIVACIONAIS)
+    bot.reply_to(message, f"✋ *+1 Reaviso em Mãos* registrado com sucesso!\n\n💬 _{frase}_", parse_mode="Markdown")
+
+# --- HANDLERS DE COMANDOS E OUTROS MENUS ---
 @bot.message_handler(commands=['start'])
 def start(message):
     str_id = str(message.from_user.id)
     nome = message.from_user.first_name
     inicializar_agente(str_id, nome)
 
-    # Verificação de Autorização
     if not esta_autorizado(str_id):
         bot.reply_to(
             message, 
@@ -555,7 +581,7 @@ def registrar_servico_manual(message):
     except:
         bot.reply_to(message, f"⚠️ Sintaxe: `{comando} 10`", parse_mode="Markdown")
 
-# --- RELATÓRIOS E CONSULTAS COM VALOR PARCIAL MENSAL SALVO ---
+# --- RELATÓRIOS E CONSULTAS ---
 @bot.message_handler(func=lambda m: m.text == '📅 Histórico Mensal' or m.text in ['/mensal', '/meses', '/historico'])
 def relatorio_mensal(message):
     if not esta_autorizado(message.from_user.id):
@@ -765,12 +791,11 @@ def solicitar_zerar_mensal(message):
         reply_markup=markup
     )
 
-# --- RESPOSTAS DOS BOTÕES INLINE COM ALERTA EM POP-UP (MEIO DA TELA) ---
+# --- CALLBACKS DOS BOTÕES INLINE ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = str(call.from_user.id)
 
-    # --- PROCESSAMENTO DAS AÇÕES DE ADMINISTRADOR ---
     if call.data.startswith('adm_aprovar_'):
         user_alvo = call.data.replace('adm_aprovar_', '')
         definir_autorizacao(user_alvo, True)
@@ -797,7 +822,6 @@ def callback_handler(call):
             print(f"Erro ao notificar usuário recusado: {e}")
         return
 
-    # --- VERIFICAÇÃO DE PERMISSÃO PARA DEMAIS BOTÕES ---
     if not esta_autorizado(user_id):
         bot.answer_callback_query(call.id, "⛔ Acesso não autorizado. Digite /start para solicitar.", show_alert=True)
         return
