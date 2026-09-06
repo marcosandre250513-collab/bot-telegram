@@ -26,7 +26,7 @@ DIAS_SEMANA = {
     3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
 }
 
-# --- SERVIDOR WEB PARA MANTER O BOT ATIVO ---
+# --- SERVIDOR WEB DE MANUTENÇÃO DE STATUS (RAILWAY) ---
 app = Flask('')
 
 @app.route('/')
@@ -40,7 +40,7 @@ t = Thread(target=run)
 t.start()
 
 # --- CONFIGURAÇÃO DO BOT E BANCO POSTGRESQL ---
-TOKEN = '8804109455:AAEW-Ofgrd0C9WrRWApDGd12rxz2oOHLhMc'
+TOKEN = os.environ.get('BOT_TOKEN', '8804109455:AAHPqPuDSp2cB_VANRG4EsJOevrw9sydRf8')
 bot = telebot.TeleBot(TOKEN)
 
 PESO_SERVICO = 13.64
@@ -49,7 +49,7 @@ PESO_REAVISO = 7.80
 def get_db_connection():
     url = os.environ.get('DATABASE_URL')
     if not url:
-        raise ValueError("A variável DATABASE_URL não foi encontrada. Verifique se o PostgreSQL foi adicionado no Railway.")
+        raise ValueError("A variável DATABASE_URL não foi encontrada no ambiente.")
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
     return psycopg2.connect(url, sslmode='require')
@@ -191,9 +191,7 @@ def obter_historico_mensal(user_id):
     conn.close()
     return resumo_meses
 
-# ==========================================
-# MENUS E TECLADOS INTERATIVOS
-# ==========================================
+# --- TECLADOS E INTERFACES ---
 def menu_principal_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, is_persistent=True, row_width=2)
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
@@ -231,17 +229,7 @@ def teclado_confirmacao_reset_semana():
     )
     return markup
 
-def teclado_confirmacao_zerar():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("⚠️ APAGAR HISTÓRICO", callback_data="confirm_zerar_hist"),
-        types.InlineKeyboardButton("❌ CANCELAR", callback_data="cancel_zerar_hist")
-    )
-    return markup
-
-# ==========================================
-# HANDLERS DE ENTRADA MANUAL (NEXT STEP)
-# ==========================================
+# --- FUNÇÕES DE CAPTURA CONTINUA (NEXT STEP) ---
 def receber_qnt_corte(message):
     try:
         qnt = int(message.text)
@@ -266,9 +254,45 @@ def receber_qnt_reaviso_outros(message):
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
-# ==========================================
-# COMANDOS E CONVERSÃO
-# ==========================================
+# --- HANDLERS DE COMANDOS DE TEXTO E MENUS ---
+@bot.message_handler(commands=['start'])
+def start(message):
+    str_id = str(message.from_user.id)
+    nome = message.from_user.first_name
+    inicializar_agente(str_id, nome)
+    texto = (
+        f"🌐 *SISTEMA OPERACIONAL ATIVO*\n"
+        f"Bem-vindo, {nome}.\n\n"
+        "Selecione uma das opções no menu para registrar ou consultar:"
+    )
+    bot.reply_to(message, texto, parse_mode="Markdown", reply_markup=menu_principal_keyboard())
+
+@bot.message_handler(commands=['comandos', 'ajuda', 'help'])
+@bot.message_handler(func=lambda m: m.text == '📜 Lista de Comandos')
+def listar_comandos(message):
+    texto = (
+        "📜 *LISTA DE COMANDOS DISPONÍVEIS*\n\n"
+        "📊 *Relatórios e Histórico:*\n"
+        "• `/relatorio` ou `/prod` - Exibe a parcial da semana atual\n"
+        "• `/mensal` ou `/historico` - Consulta o total acumulado mês a mês\n"
+        "• `/resetar` - Zera a contagem semanal ativa\n"
+        "• `/zerar_mensal` - Zera permanentemente o histórico do `/mensal`\n\n"
+        "⚡ *Lançamentos Rápidos por Texto:*\n"
+        "• `/corte [qnt]` - Registra cortes (Ex: `/corte 10`)\n"
+        "• `/rel [qnt]` - Registra religações (Ex: `/rel 5`)\n"
+        "• `/rea [qnt]` - Registra carga de reavisos (Ex: `/rea 30`)\n"
+        "• `/imp [qnt]` - Registra improdutivos (Ex: `/imp 2`)\n"
+        "• `/maos [qnt]` - Transfere reavisos para 'em mãos' (Ex: `/maos 2`)\n\n"
+        "⚙️ *Ajustes de Dia Específico:*\n"
+        "• `/addcorte [dia] [qnt]` - Lança cortes em dia específico (Ex: `/addcorte seg 10`)"
+    )
+    bot.reply_to(message, texto, parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == '⚡ Registrar Produção')
+def menu_registro(message):
+    bot.reply_to(message, "⚡ *PAINEL DE REGISTRO RÁPIDO*\nToque abaixo para registrar:", 
+                 parse_mode="Markdown", reply_markup=teclado_registro_rapido())
+
 @bot.message_handler(commands=['maos'])
 def converter_maos_manual(message):
     str_id = str(message.from_user.id)
@@ -288,7 +312,7 @@ def add_corte_dia_especifico(message):
     try:
         partes = message.text.split()
         if len(partes) < 3:
-            return bot.reply_to(message, "⚠️ *SINTAXE INCORRETA*\nUse: `/addcorte [dia] [qnt]`", parse_mode="Markdown")
+            return bot.reply_to(message, "⚠️ Use: `/addcorte [dia] [qnt]`", parse_mode="Markdown")
 
         dia_input = partes[1].upper().strip()
         quantidade = int(partes[2])
@@ -300,17 +324,35 @@ def add_corte_dia_especifico(message):
         }
 
         if dia_input not in mapa_dias:
-            return bot.reply_to(message, "⚠️ *DIA INVÁLIDO*\nDias: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`", parse_mode="Markdown")
+            return bot.reply_to(message, "⚠️ Dias válidos: `SEG`, `TERCA`, `QUARTA`, `QUINTA`, `SEXTA`, `SAB`", parse_mode="Markdown")
 
         dia_chave = mapa_dias[dia_input]
         processar_lancamento(str_id, 'corte', quantidade, dia_especifico=dia_chave)
-        bot.reply_to(message, f"🤫 *AJUSTE MANUAL REALIZADO*\n+{quantidade} Corte(s) em *{dia_chave}*", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ +{quantidade} Corte(s) lançado(s) no dia *{dia_chave}*", parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, f"⚠️ Erro ao processar: {str(e)}", parse_mode="Markdown")
 
-# ==========================================
-# HISTÓRICO MENSAL
-# ==========================================
+@bot.message_handler(commands=['corte', 'rel', 'rea', 'imp', 'religacao', 'improdutivo'])
+def registrar_servico_manual(message):
+    str_id = str(message.from_user.id)
+    inicializar_agente(str_id, message.from_user.first_name)
+    
+    comando = message.text.split()[0].lower()
+    
+    if comando == '/corte': tipo_id, tipo_nome = 'corte', 'Corte'
+    elif comando in ['/rel', '/religacao']: tipo_id, tipo_nome = 'religacao', 'Religação'
+    elif comando in ['/rea']: tipo_id, tipo_nome = 'reaviso_outros', 'Reaviso'
+    elif comando in ['/imp', '/improdutivo']: tipo_id, tipo_nome = 'improdutivo', 'Improdutivo'
+    else: return
+
+    try:
+        quantidade = int(message.text.split()[1])
+        processar_lancamento(str_id, tipo_id, quantidade)
+        bot.reply_to(message, f"✅ *+{quantidade} {tipo_nome}(s)* registrado(s)!", parse_mode="Markdown")
+    except:
+        bot.reply_to(message, f"⚠️ Sintaxe: `{comando} 10`", parse_mode="Markdown")
+
+# --- RELATÓRIOS E CONSULTAS ---
 @bot.message_handler(func=lambda m: m.text == '📅 Histórico Mensal' or m.text in ['/mensal', '/meses', '/historico'])
 def relatorio_mensal(message):
     str_id = str(message.from_user.id)
@@ -320,7 +362,7 @@ def relatorio_mensal(message):
     dados_meses = obter_historico_mensal(str_id)
     
     if not dados_meses:
-        return bot.reply_to(message, "📂 *Nenhum histórico mensal encontrado no banco ainda.*", parse_mode="Markdown")
+        return bot.reply_to(message, "📂 *Nenhum histórico mensal registrado no momento.*", parse_mode="Markdown")
     
     texto = f"📅 *HISTÓRICO MENSAL DE PRODUÇÃO*\n👤 Agente: *{nome.upper()}*\n\n"
     
@@ -342,82 +384,14 @@ def relatorio_mensal(message):
             f"🗓️ *{nome_mes} / {ano}*\n"
             f"• Cortes / Religações: *{cr}*\n"
             f"• Reavisos Atendidos: *{rv}*\n"
-            f"• Improdutivos (Visitas): *{imp}*\n"
-            f"• Pontuação Total Acumulada: *{pts_est:.2f} pts*\n"
-            f"💰 *Pagamento Previsto Em:* *{nome_mes_pag} / {ano_pag}*\n"
+            f"• Improdutivos: *{imp}*\n"
+            f"• Pontuação Total: *{pts_est:.2f} pts*\n"
+            f"💰 *Pagamento Estimado:* *{nome_mes_pag} / {ano_pag}*\n"
             f"----------------------------------------\n"
         )
     
     bot.send_message(message.chat.id, texto, parse_mode="Markdown")
 
-# ==========================================
-# ZERAR HISTÓRICO MENSAL (COM CONFIRMAÇÃO)
-# ==========================================
-@bot.message_handler(commands=['zerar_mensal', 'resetarmensal'])
-def solicitar_zerar_mensal(message):
-    str_id = str(message.from_user.id)
-    inicializar_agente(str_id, message.from_user.first_name)
-    
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("⚠️ SIM, ZERAR MENSAL", callback_data="confirm_zerar_mensal"),
-        types.InlineKeyboardButton("❌ CANCELAR", callback_data="cancel_zerar_mensal")
-    )
-    
-    bot.reply_to(
-        message, 
-        "🚨 *ATENÇÃO: EXCLUSÃO DO HISTÓRICO MENSAL*\n\n"
-        "Esta ação irá **apagar permanentemente todos os registros do histórico mensal** salvos no banco de dados PostgreSQL.\n\n"
-        "Tem certeza absoluta de que deseja zerar seu histórico mensal?", 
-        parse_mode="Markdown", 
-        reply_markup=markup
-    )
-
-# ==========================================
-# HANDLERS DE COMANDOS E AJUDA
-# ==========================================
-@bot.message_handler(commands=['comandos', 'ajuda', 'help'])
-@bot.message_handler(func=lambda m: m.text == '📜 Lista de Comandos')
-def listar_comandos(message):
-    texto = (
-        "📜 *LISTA DE COMANDOS DO BOT*\n\n"
-        "📊 *Relatórios e Histórico:*\n"
-        "• `/relatorio` ou `/prod` - Exibe a parcial da semana atual\n"
-        "• `/mensal` ou `/historico` - Consulta total acumulado de meses passados\n"
-        "• `/comandos` - Exibe esta lista de comandos\n"
-        "• `/resetar` - Zera a contagem da semana atual\n"
-        "• `/zerar_mensal` - Zera todo o histórico mensal acumulado\n\n"
-        "⚡ *Lançamentos Diretos por Texto:*\n"
-        "• `/corte [qnt]` - Registra cortes (Ex: `/corte 10`)\n"
-        "• `/rel [qnt]` - Registra religações (Ex: `/rel 5`)\n"
-        "• `/rea [qnt]` - Registra carga de reavisos (Ex: `/rea 30`)\n"
-        "• `/imp [qnt]` - Registra improdutivos (Ex: `/imp 2`)\n"
-        "• `/maos [qnt]` - Converte reavisos para em mãos (Ex: `/maos 1` ou `/maos 5`)\n\n"
-        "⚙️ *Ajustes Específicos:*\n"
-        "• `/addcorte [dia] [qnt]` - Adiciona cortes em dia específico (Ex: `/addcorte seg 10`)"
-    )
-    bot.reply_to(message, texto, parse_mode="Markdown")
-
-@bot.message_handler(commands=['start'])
-def start(message):
-    str_id = str(message.from_user.id)
-    nome = message.from_user.first_name
-    inicializar_agente(str_id, nome)
-    texto = (
-        f"🌐 *MEU SISTEMA DE PERFORMANCE*\n"
-        f"Bem-vindo, {nome}.\n\n"
-        "Menu fixo ativado. Selecione uma opção para operar:"
-    )
-    bot.reply_to(message, texto, parse_mode="Markdown", reply_markup=menu_principal_keyboard())
-
-@bot.message_handler(func=lambda m: m.text == '⚡ Registrar Produção')
-def menu_registro(message):
-    bot.reply_to(message, "⚡ *REGISTRO RÁPIDO DE CAMPO*\nToque nos botões para lançar sua produção:", 
-                 parse_mode="Markdown", reply_markup=teclado_registro_rapido())
-
-# ==========================================
-# RELATÓRIO FORMATADO SEMANAL
-# ==========================================
 @bot.message_handler(func=lambda m: m.text == '📊 Relatório Semanal' or m.text in ['/relatorio', '/status', '/prod', '/dds'])
 def relatorio(message):
     str_id = str(message.from_user.id)
@@ -484,7 +458,7 @@ def relatorio(message):
 
     bonif_str = f"{bonificacao:,.2f}".replace('.', ',')
     msg_bonif = (
-        f"👋 Olá {nome.upper()}, segue abaixo a sua parcial da bonificação semanal:\n\n"
+        f"👋 Olá {nome.upper()}, segue a sua parcial da semana:\n\n"
         f"📅 Semana ({data_inicio} a {data_fim}):\n"
         f"• Cortes/Religações: {cr}\n"
         f"• Reavisos: {detalhe_reaviso}\n"
@@ -517,11 +491,6 @@ def relatorio(message):
 
     msg_diario = (
         "📅 *Serviços executados por dia:*\n\n"
-        "📌 *Legenda:*\n"
-        "CR = Cortes/Religações\n"
-        "RV = Reavisos Total\n"
-        "EN = Entregas/Improdutivos\n"
-        "NG = Negociações\n\n"
         "```\n"
         "Data       | CR | RV | EN | NG\n"
         "--------------------------------\n"
@@ -531,27 +500,7 @@ def relatorio(message):
 
     bot.send_message(message.chat.id, msg_diario, parse_mode="Markdown")
 
-# --- COMANDOS DIGITADOS MANUAIS ---
-@bot.message_handler(commands=['corte', 'rel', 'rea', 'imp', 'religacao', 'improdutivo'])
-def registrar_servico_manual(message):
-    str_id = str(message.from_user.id)
-    inicializar_agente(str_id, message.from_user.first_name)
-    
-    comando = message.text.split()[0].lower()
-    
-    if comando == '/corte': tipo_id, tipo_nome = 'corte', 'Corte'
-    elif comando in ['/rel', '/religacao']: tipo_id, tipo_nome = 'religacao', 'Religação'
-    elif comando in ['/rea']: tipo_id, tipo_nome = 'reaviso_outros', 'Reaviso'
-    elif comando in ['/imp', '/improdutivo']: tipo_id, tipo_nome = 'improdutivo', 'Improdutivo'
-    else: return
-
-    try:
-        quantidade = int(message.text.split()[1])
-        processar_lancamento(str_id, tipo_id, quantidade)
-        bot.reply_to(message, f"✅ *INPUT ACEITO*\nVolume processado: +{quantidade} {tipo_nome}(s)", parse_mode="Markdown")
-    except:
-        bot.reply_to(message, f"⚠️ *SINTAXE INCORRETA*\nEx: `{comando} 10`", parse_mode="Markdown")
-
+# --- COMANDOS DE RESET E ZERAR ---
 @bot.message_handler(func=lambda m: m.text == '🔄 Resetar Semana' or m.text == '/resetar')
 def solicitar_reset_semana(message):
     str_id = str(message.from_user.id)
@@ -559,45 +508,49 @@ def solicitar_reset_semana(message):
     bot.reply_to(
         message, 
         "⚠️ *CONFIRMAÇÃO DE RESET SEMANAL*\n\n"
-        "Você tem certeza de que deseja **zerar a contagem desta semana**?\n"
-        "(Seu histórico permanente NÃO será apagado).", 
+        "Deseja zerar a contagem ativa da semana atual?", 
         parse_mode="Markdown", 
         reply_markup=teclado_confirmacao_reset_semana()
     )
 
-@bot.message_handler(commands=['zerar_historico'])
-def solicitar_zerar_historico(message):
+@bot.message_handler(commands=['zerar_mensal', 'resetarmensal'])
+def solicitar_zerar_mensal(message):
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("⚠️ SIM, ZERAR MENSAL", callback_data="confirm_zerar_mensal"),
+        types.InlineKeyboardButton("❌ CANCELAR", callback_data="cancel_zerar_mensal")
+    )
+    
     bot.reply_to(
         message, 
-        "⚠️ *ATENÇÃO: AÇÃO IRREVERSÍVEL!*\n\n"
-        "Você está prestes a **apagar permanentemente todo o seu Histórico de Produção**.\n"
-        "Tem certeza de que deseja continuar?", 
+        "🚨 *ATENÇÃO: EXCLUSÃO DO HISTÓRICO MENSAL*\n\n"
+        "Esta ação apagará permanentemente todos os lançamentos do banco de dados.\n\n"
+        "Deseja zerar o histórico do `/mensal`?", 
         parse_mode="Markdown", 
-        reply_markup=teclado_confirmacao_zerar()
+        reply_markup=markup
     )
 
-# ==========================================
-# PROCESSAMENTO DE BOTÕES E CALLBACKS
-# ==========================================
+# --- RESPOSTAS DOS BOTÕES INLINE (CALLBACKS) ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = str(call.from_user.id)
     inicializar_agente(user_id, call.from_user.first_name)
 
     if call.data == 'prompt_corte':
-        msg = bot.send_message(call.message.chat.id, "✂️ *Quantos Cortes você deseja adicionar?*", parse_mode="Markdown")
+        msg = bot.send_message(call.message.chat.id, "✂️ *Digite a quantidade de Cortes:*", parse_mode="Markdown")
         bot.register_next_step_handler(msg, receber_qnt_corte)
         bot.answer_callback_query(call.id)
 
     elif call.data == 'prompt_religacao':
-        msg = bot.send_message(call.message.chat.id, "🔌 *Quantas Religações você deseja adicionar?*", parse_mode="Markdown")
+        msg = bot.send_message(call.message.chat.id, "🔌 *Digite a quantidade de Religações:*", parse_mode="Markdown")
         bot.register_next_step_handler(msg, receber_qnt_religacao)
         bot.answer_callback_query(call.id)
 
     elif call.data == 'prompt_reaviso_outros':
-        msg = bot.send_message(call.message.chat.id, "📬 *Quantos Reavisos deseja adicionar à sua carga?*", parse_mode="Markdown")
+        msg = bot.send_message(call.message.chat.id, "📬 *Digite a quantidade de Reavisos:*", parse_mode="Markdown")
         bot.register_next_step_handler(msg, receber_qnt_reaviso_outros)
         bot.answer_callback_query(call.id)
 
@@ -621,30 +574,11 @@ def callback_handler(call):
         cur.close()
         conn.close()
         
-        bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO!*\nA contagem da semana foi zerada com sucesso.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO!*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Semana zerada!", show_alert=True)
 
     elif call.data == 'cancel_reset_semana':
-        bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*\nSua produção semanal continua mantida.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Cancelado!")
-
-    elif call.data == 'confirm_zerar_hist':
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM lancamentos WHERE user_id = %s;", (user_id,))
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        bot.edit_message_text("🗑️ *HISTÓRICO PERMANENTE ZERADO!*\nTodos os registros antigos foram apagados com sucesso.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Histórico apagado!", show_alert=True)
-
-    elif call.data == 'cancel_zerar_hist':
-        bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*\nSeu histórico permanece gravado com segurança.", 
-                              chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Cancelado!")
 
     elif call.data == 'confirm_zerar_mensal':
@@ -655,27 +589,14 @@ def callback_handler(call):
         cur.close()
         conn.close()
         
-        bot.edit_message_text(
-            "🗑️ *HISTÓRICO MENSAL ZERADO COM SUCESSO!*\n\n"
-            "Todos os lançamentos acumulados foram permanentemente removidos. "
-            "Seu relatório em `/mensal` agora começará limpo.", 
-            chat_id=call.message.chat.id, 
-            message_id=call.message.message_id, 
-            parse_mode="Markdown"
-        )
-        bot.answer_callback_query(call.id, "Histórico mensal zerado!", show_alert=True)
+        bot.edit_message_text("🗑️ *HISTÓRICO MENSAL ZERADO COM SUCESSO!*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id, "Histórico zerado!", show_alert=True)
 
     elif call.data == 'cancel_zerar_mensal':
-        bot.edit_message_text(
-            "❌ *OPERAÇÃO CANCELADA.*\n"
-            "Seu histórico mensal permanece intacto no banco de dados.", 
-            chat_id=call.message.chat.id, 
-            message_id=call.message.message_id, 
-            parse_mode="Markdown"
-        )
+        bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
         bot.answer_callback_query(call.id, "Cancelado!")
 
-# --- INICIALIZAÇÃO DO BANCO E DO BOT (COM TRATAMENTO DE CONFLITO) ---
+# --- INICIALIZAÇÃO SEGURA DO SERVIÇO ---
 print("Inicializando tabelas do PostgreSQL...")
 init_db()
 
