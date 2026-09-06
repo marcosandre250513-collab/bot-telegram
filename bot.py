@@ -3,6 +3,7 @@ from telebot import types
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import math
+import random
 from flask import Flask
 from threading import Thread
 import os
@@ -26,6 +27,37 @@ DIAS_SEMANA = {
     3: 'QUINTA', 4: 'SEXTA', 5: 'SAB'
 }
 
+# --- LISTA COM MAIS DE 50 FRASES MOTIVACIONAIS ---
+FRASES_MOTIVACIONAIS = [
+    "Mais um pra conta! 🚀", "Excelente trabalho! 💪", "Foco na meta! 🎯", 
+    "Acelera que a vitória é certa! ⚡", "Trabalho impecável! 🔥", "Menos um na fila, parabéns! 👏", 
+    "A constância gera o resultado! 🏆", "Segue o plano! 📈", "Cada serviço conta! 🥇", 
+    "Pra cima, com tudo! 💥", "Determinação total! ⚡", "Sua dedicação faz a diferença! 🌟", 
+    "Produtividade lá no alto! 🔝", "Nada segura você hoje! 🏃‍♂️", "Mais uma missão cumprida! ✅", 
+    "Mantendo o ritmo forte! 🚴‍♂️", "Construindo o resultado dia a dia! 🛠️", "O esforço diário compensa! 💪", 
+    "Execução perfeita! ✨", "Mais um passo rumo à meta! 🏁", "A recompensa vem no final do mês! 💰", 
+    "Com determinação, o resultado vem! 🎯", "Ritmo acelerado, parabéns! 🚀", "Mantenha a pegada! 🔥", 
+    "Trabalho duro sempre vence! 🤛", "Incrível agilidade! ⚡", "Mais um concluído com sucesso! 🎉", 
+    "Focado e produtivo! 📊", "Seu esforço garante a bonificação! 🏆", "Avançando firme no objetivo! 🎯", 
+    "Excelente desempenho no campo! 👏", "Domínio total do serviço! 🛠️", "Direto ao ponto, parabéns! 🎯", 
+    "Não para, não para! 🚀", "Foco, força e produção! 💪", "Trabalho feito com excelência! 👑", 
+    "Superando os limites hoje! ⚡", "Garantindo a bonificação da semana! 💰", "Mais uma etapa concluída! 🏁", 
+    "Orgulho do trabalho bem feito! 🌟", "Organização e agilidade! ⏱️", "Cada conquista importa! 🥇", 
+    "Mostrou como se faz! 👌", "Eficiência em primeiro lugar! ⚡", "Siga firme no propósito! 🎯", 
+    "Sua garra é inspiradora! 🔥", "Mais um registrado com sucesso! 📝", "O topo é o seu lugar! 🏔️", 
+    "Progresso contínuo! 📈", "Fazendo acontecer no dia a dia! 💥", "Resultado garantido! ✅", 
+    "Sempre em movimento! 🏃‍♂️", "Trabalho de alto nível! 🥇"
+]
+
+# --- AVISO INSTITUCIONAL INDEPENDENTE ---
+AVISO_INDEPENDENTE = (
+    "⚠️ *AVISO IMPORTANTE DE USO*\n\n"
+    "Este bot *NÃO é um sistema oficial da empresa* e não possui qualquer vínculo com a concessionária.\n"
+    "Trata-se de uma ferramenta independente desenvolvida por um funcionário para auxílio e controle pessoal de suas metas e bonificações.\n\n"
+    "📌 *Nota:* Todas as informações e números registrados são inseridos manualmente pelo próprio usuário e são totalmente manipuláveis, "
+    "servindo exclusivamente como um painel pessoal de acompanhamento."
+)
+
 # --- SERVIDOR WEB DE MANUTENÇÃO DE STATUS (RAILWAY) ---
 app = Flask('')
 
@@ -40,7 +72,7 @@ t = Thread(target=run)
 t.start()
 
 # --- CONFIGURAÇÃO DO BOT E BANCO POSTGRESQL ---
-TOKEN = os.environ.get('BOT_TOKEN', '8804109455:AAHyQLQe0Ccqi_uiKFu68h0tO570M5MvmAw')
+TOKEN = os.environ.get('BOT_TOKEN', '8804109455:AAHPqPuDSp2cB_VANRG4EsJOevrw9sydRf8')
 bot = telebot.TeleBot(TOKEN)
 
 PESO_SERVICO = 13.64
@@ -197,7 +229,7 @@ def menu_principal_keyboard():
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
     btn_mensal = types.KeyboardButton('📅 Histórico Mensal')
     btn_registrar = types.KeyboardButton('⚡ Registrar Produção')
-    btn_comandos = types.KeyboardButton('📜 Lista de Comandos')
+    btn_comandos = types.KeyboardButton('📜 Comandos & Termos')
     btn_reset_semana = types.KeyboardButton('🔄 Resetar Semana')
     
     markup.add(btn_relatorio, btn_mensal)
@@ -234,7 +266,8 @@ def receber_qnt_corte(message):
     try:
         qnt = int(message.text)
         processar_lancamento(message.from_user.id, 'corte', qnt)
-        bot.reply_to(message, f"✅ *+ {qnt} Corte(s)* adicionado(s) com sucesso!", parse_mode="Markdown")
+        frase = random.choice(FRASES_MOTIVACIONAIS)
+        bot.reply_to(message, f"✅ *+ {qnt} Corte(s)* adicionado(s) com sucesso!\n\n💬 _{frase}_", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
@@ -242,7 +275,8 @@ def receber_qnt_religacao(message):
     try:
         qnt = int(message.text)
         processar_lancamento(message.from_user.id, 'religacao', qnt)
-        bot.reply_to(message, f"✅ *+ {qnt} Religação(ões)* adicionada(s) com sucesso!", parse_mode="Markdown")
+        frase = random.choice(FRASES_MOTIVACIONAIS)
+        bot.reply_to(message, f"✅ *+ {qnt} Religação(ões)* adicionada(s) com sucesso!\n\n💬 _{frase}_", parse_mode="Markdown")
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
@@ -263,17 +297,18 @@ def start(message):
     texto = (
         f"🌐 *SISTEMA OPERACIONAL ATIVO*\n"
         f"Bem-vindo, {nome}.\n\n"
+        f"{AVISO_INDEPENDENTE}\n\n"
         "Selecione uma das opções no menu para registrar ou consultar:"
     )
     bot.reply_to(message, texto, parse_mode="Markdown", reply_markup=menu_principal_keyboard())
 
-@bot.message_handler(commands=['comandos', 'ajuda', 'help'])
-@bot.message_handler(func=lambda m: m.text == '📜 Lista de Comandos')
+@bot.message_handler(commands=['comandos', 'ajuda', 'help', 'aviso'])
+@bot.message_handler(func=lambda m: m.text == '📜 Comandos & Termos')
 def listar_comandos(message):
     texto = (
         "📜 *LISTA DE COMANDOS DISPONÍVEIS*\n\n"
         "📊 *Relatórios e Histórico:*\n"
-        "• `/relatorio` ou `/prod` - Exibe a parcial da semana atual\n"
+        "• `/relatorio` ou `/prod` - Exibe o resumo da semana atual\n"
         "• `/mensal` ou `/historico` - Consulta o total acumulado mês a mês\n"
         "• `/resetar` - Zera a contagem semanal ativa\n"
         "• `/zerar_mensal` - Zera permanentemente o histórico do `/mensal`\n\n"
@@ -284,7 +319,9 @@ def listar_comandos(message):
         "• `/imp [qnt]` - Registra improdutivos (Ex: `/imp 2`)\n"
         "• `/maos [qnt]` - Transfere reavisos para 'em mãos' (Ex: `/maos 2`)\n\n"
         "⚙️ *Ajustes de Dia Específico:*\n"
-        "• `/addcorte [dia] [qnt]` - Lança cortes em dia específico (Ex: `/addcorte seg 10`)"
+        "• `/addcorte [dia] [qnt]` - Lança cortes em dia específico (Ex: `/addcorte seg 10`)\n\n"
+        f"----------------------------------------\n"
+        f"{AVISO_INDEPENDENTE}"
     )
     bot.reply_to(message, texto, parse_mode="Markdown")
 
@@ -328,7 +365,8 @@ def add_corte_dia_especifico(message):
 
         dia_chave = mapa_dias[dia_input]
         processar_lancamento(str_id, 'corte', quantidade, dia_especifico=dia_chave)
-        bot.reply_to(message, f"✅ +{quantidade} Corte(s) lançado(s) no dia *{dia_chave}*", parse_mode="Markdown")
+        frase = random.choice(FRASES_MOTIVACIONAIS)
+        bot.reply_to(message, f"✅ +{quantidade} Corte(s) lançado(s) no dia *{dia_chave}*\n\n💬 _{frase}_", parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, f"⚠️ Erro ao processar: {str(e)}", parse_mode="Markdown")
 
@@ -348,7 +386,9 @@ def registrar_servico_manual(message):
     try:
         quantidade = int(message.text.split()[1])
         processar_lancamento(str_id, tipo_id, quantidade)
-        bot.reply_to(message, f"✅ *+{quantidade} {tipo_nome}(s)* registrado(s)!", parse_mode="Markdown")
+        
+        frase_extra = f"\n\n💬 _{random.choice(FRASES_MOTIVACIONAIS)}_" if tipo_id in ['corte', 'religacao'] else ""
+        bot.reply_to(message, f"✅ *+{quantidade} {tipo_nome}(s)* registrado(s)!{frase_extra}", parse_mode="Markdown")
     except:
         bot.reply_to(message, f"⚠️ Sintaxe: `{comando} 10`", parse_mode="Markdown")
 
@@ -378,14 +418,11 @@ def relatorio_mensal(message):
             ano_pag += 1
         nome_mes_pag = MESES_NOME.get(mes_pag_num, str(mes_pag_num))
         
-        pts_est = (cr * PESO_SERVICO) + (rv * PESO_REAVISO)
-        
         texto += (
             f"🗓️ *{nome_mes} / {ano}*\n"
             f"• Cortes / Religações: *{cr}*\n"
             f"• Reavisos Atendidos: *{rv}*\n"
             f"• Improdutivos: *{imp}*\n"
-            f"• Pontuação Total: *{pts_est:.2f} pts*\n"
             f"💰 *Pagamento Estimado:* *{nome_mes_pag} / {ano_pag}*\n"
             f"----------------------------------------\n"
         )
@@ -458,7 +495,7 @@ def relatorio(message):
 
     bonif_str = f"{bonificacao:,.2f}".replace('.', ',')
     msg_bonif = (
-        f"👋 Olá {nome.upper()}, segue a sua parcial da semana:\n\n"
+        f"👋 Olá {nome.upper()}, segue o resumo da sua produção na semana:\n\n"
         f"📅 Semana ({data_inicio} a {data_fim}):\n"
         f"• Cortes/Religações: {cr}\n"
         f"• Reavisos: {detalhe_reaviso}\n"
@@ -466,7 +503,7 @@ def relatorio(message):
         f"• Negociações: {ng}\n"
         f"• Faixa: {faixa_str}\n"
         f"• {falta_str}\n"
-        f"💰 Bonificação parcial: R$ {bonif_str}\n\n"
+        f"💰 Bonificação estimada: R$ {bonif_str}\n\n"
         f"🗓️ *MÊS DE PAGAMENTO DESTA PRODUÇÃO:*\n"
         f"➡️ *{nome_mes_pagamento}*"
     )
@@ -556,7 +593,9 @@ def callback_handler(call):
 
     elif call.data == 'add_religacao_1':
         processar_lancamento(user_id, 'religacao', 1)
-        bot.answer_callback_query(call.id, "🔌 +1 Religação Registrada!", show_alert=True)
+        frase = random.choice(FRASES_MOTIVACIONAIS)
+        bot.send_message(call.message.chat.id, f"🔌 *+1 Religação Registrada!*\n\n💬 _{frase}_", parse_mode="Markdown")
+        bot.answer_callback_query(call.id, "🔌 +1 Religação Registrada!")
 
     elif call.data == 'convert_maos_1':
         converter_reaviso_para_maos(user_id, 1)
