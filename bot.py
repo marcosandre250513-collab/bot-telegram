@@ -10,6 +10,10 @@ import os
 import time
 import psycopg2
 
+# --- CONFIGURAÇÃO DO ADMINISTRADOR DO BOT ---
+# Cole aqui o seu ID numérico do Telegram para você ser o administrador do sistema
+ADMIN_ID = os.environ.get('ADMIN_ID', 'SEU_TELEGRAM_ID_AQUI') 
+
 # --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
 
@@ -179,8 +183,12 @@ def init_db():
     cur.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             user_id VARCHAR(50) PRIMARY KEY,
-            nome VARCHAR(100)
+            nome VARCHAR(100),
+            autorizado BOOLEAN DEFAULT FALSE
         );
+    ''')
+    cur.execute('''
+        ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS autorizado BOOLEAN DEFAULT FALSE;
     ''')
     cur.execute('''
         CREATE TABLE IF NOT EXISTS lancamentos (
@@ -197,15 +205,37 @@ def init_db():
     cur.close()
     conn.close()
 
-def inicializar_agente(user_id, nome):
+def esta_autorizado(user_id):
+    str_id = str(user_id)
+    if str_id == str(ADMIN_ID):
+        return True
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT autorizado FROM usuarios WHERE user_id = %s;", (str_id,))
+    res = cur.fetchone()
+    cur.close()
+    conn.close()
+    return res[0] if res and res[0] is not None else False
+
+def definir_autorizacao(user_id, status: bool):
     str_id = str(user_id)
     conn = get_db_connection()
     cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET autorizado = %s WHERE user_id = %s;", (status, str_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def inicializar_agente(user_id, nome):
+    str_id = str(user_id)
+    is_admin = (str_id == str(ADMIN_ID))
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute('''
-        INSERT INTO usuarios (user_id, nome)
-        VALUES (%s, %s)
+        INSERT INTO usuarios (user_id, nome, autorizado)
+        VALUES (%s, %s, %s)
         ON CONFLICT (user_id) DO UPDATE SET nome = EXCLUDED.nome;
-    ''', (str_id, nome))
+    ''', (str_id, nome, is_admin))
     conn.commit()
     cur.close()
     conn.close()
@@ -312,7 +342,6 @@ def obter_historico_mensal(user_id):
 
 # --- TECLADOS E INTERFACES (BOTÕES EXPANDIDOS PARA USO RÁPIDO NO CAMPO) ---
 def menu_principal_keyboard():
-    # resize_keyboard=False faz os botões ficarem grandes na tela e is_persistent=True fixa o menu
     markup = types.ReplyKeyboardMarkup(resize_keyboard=False, is_persistent=True, row_width=2)
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
     btn_mensal = types.KeyboardButton('📅 Histórico Mensal')
@@ -382,6 +411,36 @@ def start(message):
     str_id = str(message.from_user.id)
     nome = message.from_user.first_name
     inicializar_agente(str_id, nome)
+
+    # Verificação de Autorização
+    if not esta_autorizado(str_id):
+        bot.reply_to(
+            message, 
+            "⏳ *SOLICITAÇÃO DE ACESSO ENVIADA*\n\n"
+            "Seu acesso está pendente de aprovação pelo administrador. "
+            "Você receberá uma notificação assim que for liberado!", 
+            parse_mode="Markdown"
+        )
+        
+        if str(ADMIN_ID) != 'SEU_TELEGRAM_ID_AQUI':
+            markup = types.InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                types.InlineKeyboardButton("✅ APROVAR", callback_data=f"adm_aprovar_{str_id}"),
+                types.InlineKeyboardButton("❌ RECUSAR", callback_data=f"adm_recusar_{str_id}")
+            )
+            
+            texto_admin = (
+                f"🔔 *NOVA SOLICITAÇÃO DE ACESSO*\n\n"
+                f"👤 *Nome:* {nome}\n"
+                f"🆔 *ID:* `{str_id}`\n\n"
+                f"Deseja liberar este usuário para usar o bot?"
+            )
+            try:
+                bot.send_message(ADMIN_ID, texto_admin, parse_mode="Markdown", reply_markup=markup)
+            except Exception as e:
+                print(f"Erro ao notificar admin: {e}")
+        return
+
     texto = (
         f"🌐 *SISTEMA OPERACIONAL ATIVO*\n"
         f"Bem-vindo, {nome}.\n\n"
@@ -393,6 +452,9 @@ def start(message):
 @bot.message_handler(commands=['comandos', 'ajuda', 'help', 'aviso'])
 @bot.message_handler(func=lambda m: m.text == '📜 Comandos & Termos')
 def listar_comandos(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     texto = (
         "📜 *LISTA DE COMANDOS DISPONÍVEIS*\n\n"
         "📊 *Relatórios e Histórico:*\n"
@@ -415,11 +477,17 @@ def listar_comandos(message):
 
 @bot.message_handler(func=lambda m: m.text == '⚡ Registrar Produção')
 def menu_registro(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     bot.reply_to(message, "⚡ *PAINEL DE REGISTRO RÁPIDO*\nToque abaixo para registrar:", 
                  parse_mode="Markdown", reply_markup=teclado_registro_rapido())
 
 @bot.message_handler(commands=['maos'])
 def converter_maos_manual(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
     try:
@@ -433,6 +501,9 @@ def converter_maos_manual(message):
 
 @bot.message_handler(commands=['addcorte', 'cortedia'])
 def add_corte_dia_especifico(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
     try:
@@ -461,6 +532,9 @@ def add_corte_dia_especifico(message):
 
 @bot.message_handler(commands=['corte', 'rel', 'rea', 'imp', 'religacao', 'improdutivo'])
 def registrar_servico_manual(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
     
@@ -484,6 +558,9 @@ def registrar_servico_manual(message):
 # --- RELATÓRIOS E CONSULTAS COM VALOR PARCIAL MENSAL SALVO ---
 @bot.message_handler(func=lambda m: m.text == '📅 Histórico Mensal' or m.text in ['/mensal', '/meses', '/historico'])
 def relatorio_mensal(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     str_id = str(message.from_user.id)
     nome = message.from_user.first_name
     inicializar_agente(str_id, nome)
@@ -507,7 +584,6 @@ def relatorio_mensal(message):
             ano_pag += 1
         nome_mes_pag = MESES_NOME.get(mes_pag_num, str(mes_pag_num))
         
-        # Cálculo de pontos do mês para determinar valor estimado e faixa atingida
         pts_mes = (cr * PESO_SERVICO) + (rv * PESO_REAVISO)
         m_f1_pts, m_f2_pts, m_f3_pts = 250 * PESO_SERVICO, 300 * PESO_SERVICO, 350 * PESO_SERVICO
         
@@ -541,6 +617,9 @@ def relatorio_mensal(message):
 
 @bot.message_handler(func=lambda m: m.text == '📊 Relatório Semanal' or m.text in ['/relatorio', '/status', '/prod', '/dds'])
 def relatorio(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     str_id = str(message.from_user.id)
     nome = message.from_user.first_name
     inicializar_agente(str_id, nome)
@@ -650,6 +729,9 @@ def relatorio(message):
 # --- COMANDOS DE RESET E ZERAR ---
 @bot.message_handler(func=lambda m: m.text == '🔄 Resetar Semana' or m.text == '/resetar')
 def solicitar_reset_semana(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
     bot.reply_to(
@@ -662,6 +744,9 @@ def solicitar_reset_semana(message):
 
 @bot.message_handler(commands=['zerar_mensal', 'resetarmensal'])
 def solicitar_zerar_mensal(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
     
@@ -684,6 +769,39 @@ def solicitar_zerar_mensal(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     user_id = str(call.from_user.id)
+
+    # --- PROCESSAMENTO DAS AÇÕES DE ADMINISTRADOR ---
+    if call.data.startswith('adm_aprovar_'):
+        user_alvo = call.data.replace('adm_aprovar_', '')
+        definir_autorizacao(user_alvo, True)
+        
+        bot.edit_message_text(f"✅ *USUÁRIO APROVADO!* (ID: `{user_alvo}`)", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id, "Usuário liberado com sucesso!", show_alert=True)
+        
+        try:
+            bot.send_message(user_alvo, "🎉 *SEU ACESSO FOI LIBERADO SEU BOT JÁ PODE SER USADO!*\n\nDigite /start para abrir o menu.", parse_mode="Markdown", reply_markup=menu_principal_keyboard())
+        except Exception as e:
+            print(f"Erro ao notificar usuário aprovado: {e}")
+        return
+
+    elif call.data.startswith('adm_recusar_'):
+        user_alvo = call.data.replace('adm_recusar_', '')
+        definir_autorizacao(user_alvo, False)
+        
+        bot.edit_message_text(f"❌ *SOLICITAÇÃO RECUSADA.* (ID: `{user_alvo}`)", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.answer_callback_query(call.id, "Solicitação recusada!", show_alert=True)
+        
+        try:
+            bot.send_message(user_alvo, "⛔ *Sua solicitação de acesso foi recusada pelo administrador.*", parse_mode="Markdown")
+        except Exception as e:
+            print(f"Erro ao notificar usuário recusado: {e}")
+        return
+
+    # --- VERIFICAÇÃO DE PERMISSÃO PARA DEMAIS BOTÕES ---
+    if not esta_autorizado(user_id):
+        bot.answer_callback_query(call.id, "⛔ Acesso não autorizado. Digite /start para solicitar.", show_alert=True)
+        return
+
     inicializar_agente(user_id, call.from_user.first_name)
 
     if call.data == 'prompt_corte':
@@ -701,7 +819,6 @@ def callback_handler(call):
         bot.register_next_step_handler(msg, receber_qnt_reaviso_outros)
         bot.answer_callback_query(call.id)
 
-    # Lançamentos Rápidos: show_alert=True força a mensagem abrir no meio da tela como Pop-Up
     elif call.data == 'add_religacao_1':
         processar_lancamento(user_id, 'religacao', 1)
         frase = random.choice(FRASES_MOTIVACIONAIS)
