@@ -52,7 +52,7 @@ FRASES_MOTIVACIONAIS = [
 # --- AVISO INSTITUCIONAL INDEPENDENTE ---
 AVISO_INDEPENDENTE = (
     "⚠️ *AVISO IMPORTANTE DE USO*\n\n"
-    "Este bot *NÃO é um sistema oficial da empresa* e não possui qualquer vínculo com a concessionária.\n"
+    "Este bot *NÃO é um sistema oficial da empresa* e não possui qualquer vínculo com a empresa.\n"
     "Trata-se de uma ferramenta independente desenvolvida por um funcionário para auxílio e controle pessoal de suas metas e bonificações.\n\n"
     "📌 *Nota:* Todas as informações e números registrados são inseridos manualmente pelo próprio usuário e são totalmente manipuláveis, "
     "servindo exclusivamente como um painel pessoal de acompanhamento."
