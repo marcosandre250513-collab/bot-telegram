@@ -11,7 +11,7 @@ import time
 import psycopg2
 
 # --- CONFIGURAÇÃO DO ADMINISTRADOR DO BOT ---
-ADMIN_ID = os.environ.get('ADMIN_ID', '8581499778') 
+ADMIN_ID = os.environ.get('ADMIN_ID', 'SEU_TELEGRAM_ID_AQUI') 
 
 # --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
@@ -339,23 +339,30 @@ def obter_historico_mensal(user_id):
     conn.close()
     return resumo_meses
 
-# --- TECLADO PRINCIPAL (MENU GRANDÃO ATUALIZADO COM AÇÕES RÁPIDAS) ---
+# --- TECLADO PRINCIPAL (MENU REARRANJADO CONFORME SOLICITADO) ---
 def menu_principal_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=False, is_persistent=True, row_width=2)
     
+    # Linha 1: Religue +1 no lugar do Relatório Semanal | Reaviso em Mãos no lugar do Histórico Mensal
     btn_religue = types.KeyboardButton('🔌 Religue +1')
     btn_maos = types.KeyboardButton('✋ Reaviso em Mãos')
     
+    # Linha 2: Improdutivo +1 no lugar de Registrar Produção | Comandos & Termos
+    btn_improdutivo = types.KeyboardButton('🚫 Improdutivo +1')
+    btn_comandos = types.KeyboardButton('📜 Comandos & Termos')
+    
+    # Linha 3: Relatório Semanal e Histórico Mensal reposicionados
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
     btn_mensal = types.KeyboardButton('📅 Histórico Mensal')
+    
+    # Linha 4: Registrar Produção (painel completo) e Resetar Semana
     btn_registrar = types.KeyboardButton('⚡ Registrar Produção')
-    btn_comandos = types.KeyboardButton('📜 Comandos & Termos')
     btn_reset_semana = types.KeyboardButton('🔄 Resetar Semana')
     
     markup.add(btn_religue, btn_maos)
+    markup.add(btn_improdutivo, btn_comandos)
     markup.add(btn_relatorio, btn_mensal)
-    markup.add(btn_registrar, btn_comandos)
-    markup.add(btn_reset_semana)
+    markup.add(btn_registrar, btn_reset_semana)
     return markup
 
 def teclado_registro_rapido():
@@ -431,6 +438,16 @@ def acao_maos_rapido(message):
     converter_reaviso_para_maos(str_id, 1)
     frase = random.choice(FRASES_MOTIVACIONAIS)
     bot.reply_to(message, f"✋ *+1 Reaviso em Mãos* registrado com sucesso!\n\n💬 _{frase}_", parse_mode="Markdown")
+
+@bot.message_handler(func=lambda m: m.text == '🚫 Improdutivo +1')
+def acao_improdutivo_rapido(message):
+    if not esta_autorizado(message.from_user.id):
+        return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
+
+    str_id = str(message.from_user.id)
+    inicializar_agente(str_id, message.from_user.first_name)
+    processar_lancamento(str_id, 'improdutivo', 1)
+    bot.reply_to(message, "🚫 *+1 Improdutivo* registrado com sucesso!", parse_mode="Markdown")
 
 # --- HANDLERS DE COMANDOS E OUTROS MENUS ---
 @bot.message_handler(commands=['start'])
