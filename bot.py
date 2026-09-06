@@ -72,7 +72,7 @@ t = Thread(target=run)
 t.start()
 
 # --- CONFIGURAÇÃO DO BOT E BANCO POSTGRESQL ---
-TOKEN = os.environ.get('BOT_TOKEN', '8804109455:AAHyQLQe0Ccqi_uiKFu68h0tO570M5MvmAw')
+TOKEN = os.environ.get('BOT_TOKEN', '8804109455:AAE9YoV5_kEH5v2pCck6JNi5Ni_gIseQOpA')
 bot = telebot.TeleBot(TOKEN)
 
 PESO_SERVICO = 13.64
