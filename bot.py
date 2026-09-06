@@ -12,7 +12,7 @@ import psycopg2
 
 # --- CONFIGURAÇÃO DO ADMINISTRADOR DO BOT ---
 # Cole aqui o seu ID numérico do Telegram para você ser o administrador do sistema
-ADMIN_ID = os.environ.get('ADMIN_ID', 'SEU_TELEGRAM_ID_AQUI') 
+ADMIN_ID = os.environ.get('ADMIN_ID', '8581499778') 
 
 # --- CONFIGURAÇÃO DO FUSO HORÁRIO (SÃO PAULO) ---
 FUSO_SP = ZoneInfo('America/Sao_Paulo')
