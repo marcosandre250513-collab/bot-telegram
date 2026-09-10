@@ -9,6 +9,8 @@ from threading import Thread
 import os
 import time
 import psycopg2
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 # --- CONFIGURAÇÃO DO ADMINISTRADOR DO BOT ---
 ADMIN_ID = os.environ.get('ADMIN_ID', '8581499778') 
@@ -137,6 +139,60 @@ FRASES_MOTIVACIONAIS = [
     "A meta da Equatorial tá pequena pro seu ritmo! 🚀",
     "Trabalho impecável, rotina vencida! 🏆",
     "Na pegada da Faixa 3 do início ao fim! 💥"
+]
+
+# --- LISTA DE 50 FRASES PARA TENTATIVAS IMPRODUTIVAS ---
+FRASES_IMPRODUTIVO = [
+    "🚫 Cliente ausente no local. Ocorrência salva!",
+    "🚫 Portão fechado e sem campainha operacional.",
+    "🚫 Cão solto no quintal! Segurança em primeiro lugar. 🐕",
+    "🚫 Sem acesso à caixa de medição/padrão trancado.",
+    "🚫 Endereço não localizado no roteiro.",
+    "🚫 Local de difícil acesso ou área de risco.",
+    "🚫 Padrão interno sem autorização de entrada.",
+    "🚫 Medidor ausente ou retirado anteriormente.",
+    "🚫 Imóvel desocupado e fechado.",
+    "🚫 Impedimento do consumidor no local.",
+    "🚫 Choveu forte, sem condições de acesso ao poste/caixa.",
+    "🚫 Ramal inacessível no momento.",
+    "🚫 Caixa com abelhas/insetos, risco operacional! 🐝",
+    "🚫 Padrão energizado/risco de choque elétrico.",
+    "🚫 Incompatibilidade de endereço na Ordem de Serviço.",
+    "🚫 Imóvel em reforma, medidor inacessível.",
+    "🚫 Morador recusou o atendimento no local.",
+    "🚫 Disjuntor desligado internamente sem acesso.",
+    "🚫 Cerca elétrica impedindo acesso seguro ao padrão.",
+    "🚫 Medidor obstruído por entulho ou vegetação.",
+    "🚫 Lacre violado com divergência, pendente de inspeção.",
+    "🚫 Visita improdutiva registrada no sistema!",
+    "🚫 Rota interrompida devido a obras na via.",
+    "🚫 Imóvel comercial fechado fora do horário.",
+    "🚫 Medidor muito alto sem espaço para escada.",
+    "🚫 Cliente alega conta paga mas sem comprovante.",
+    "🚫 Chave da caixa de medição indisponível.",
+    "🚫 Animal feroz guardando o padrão. Ocorrência gerada! 🐶",
+    "🚫 Fachada em construção sem número visível.",
+    "🚫 Medidor queimado ou danificado, encaminhado.",
+    "🚫 Sem resposta ao chamar no portão.",
+    "🚫 Tensão irregular detectada, serviço suspenso.",
+    "🚫 Padrão em altura fora da norma de segurança.",
+    "🚫 Tapume/muro cobrindo o visor do medidor.",
+    "🚫 Veículo estacionado bloqueando o poste/caixa.",
+    "🚫 Solicitação de religue com fiação interna danificada.",
+    "🚫 Consumidor ausente, reaviso deixado sob a porta.",
+    "🚫 Morador não possui a chave do cadeado do padrão.",
+    "🚫 Local sem iluminação adequada para manobra.",
+    "🚫 Padrão inundado ou com água acumulada.",
+    "🚫 Ramal clandestino identificado, repassado à fiscalização.",
+    "🚫 Risco de queda em estrutura fragilizada.",
+    "🚫 Vizinho informou que o imóvel está abandonado.",
+    "🚫 Sem acesso ao condomínio/portaria não autorizou.",
+    "🚫 Erro de cadastro da unidade consumidora.",
+    "🚫 Discrepância na numeração da rua.",
+    "🚫 Medidor instalado dentro da residência sem morador.",
+    "🚫 Tentativa de execução sem sucesso. Próxima OS!",
+    "🚫 Ocorrência de improdutividade computada na planilha!",
+    "🚫 Mais uma tentativa registrada. Foco na rota! 📉"
 ]
 
 # --- AVISO INSTITUCIONAL INDEPENDENTE ---
@@ -324,8 +380,10 @@ def obter_historico_mensal(user_id):
     cur.execute('''
         SELECT 
             TO_CHAR(data_registro, 'YYYY-MM') AS mes_ano,
-            SUM(CASE WHEN tipo IN ('corte', 'religacao') THEN quantidade ELSE 0 END) AS cr,
-            SUM(CASE WHEN tipo LIKE 'reaviso%%' THEN quantidade ELSE 0 END) AS rv,
+            SUM(CASE WHEN tipo = 'corte' THEN quantidade ELSE 0 END) AS cortes,
+            SUM(CASE WHEN tipo = 'religacao' THEN quantidade ELSE 0 END) AS religacoes,
+            SUM(CASE WHEN tipo = 'reaviso_maos' THEN quantidade ELSE 0 END) AS rv_maos,
+            SUM(CASE WHEN tipo = 'reaviso_outros' THEN quantidade ELSE 0 END) AS rv_outros,
             SUM(CASE WHEN tipo = 'improdutivo' THEN quantidade ELSE 0 END) AS imp,
             SUM(CASE WHEN tipo = 'negociacao' THEN quantidade ELSE 0 END) AS neg
         FROM lancamentos
@@ -339,23 +397,93 @@ def obter_historico_mensal(user_id):
     conn.close()
     return resumo_meses
 
-# --- TECLADO PRINCIPAL (MENU REARRANJADO CONFORME SOLICITADO) ---
+# --- GERADOR DE IMAGEM DA TABELA SEMANAL (PARA O ENCARREGADO) ---
+def criar_imagem_relatorio_semanal(nome, data_inicio, data_fim, totais, dias, faixa_str, bonif_str, pontos, mes_pagamento):
+    width, height = 720, 820
+    image = Image.new('RGB', (width, height), color=(20, 24, 33))
+    draw = ImageDraw.Draw(image)
+    
+    font_main = ImageFont.load_default()
+
+    # Cabeçalho
+    draw.rectangle([(20, 20), (700, 100)], fill=(30, 41, 59), outline=(59, 130, 246), width=2)
+    draw.text((40, 32), "COMPROVANTE DE PRODUCAO SEMANAL - CAMPO", fill=(255, 255, 255), font=font_main)
+    draw.text((40, 58), f"Agente: {nome.upper()} | Periodo: {data_inicio} a {data_fim}", fill=(148, 163, 184), font=font_main)
+
+    # Painel do Resumo
+    draw.rectangle([(20, 115), (700, 360)], fill=(30, 41, 59), outline=(100, 116, 139), width=1)
+    
+    cr = totais.get('corte', 0) + totais.get('religacao', 0)
+    rv_m = totais.get('reaviso_maos', 0)
+    rv_o = totais.get('reaviso_outros', 0)
+    rv_tot = rv_m + rv_o
+    imp = totais.get('improdutivo', 0)
+    ng = totais.get('negociacao', 0)
+
+    lines_summary = [
+        "---------------- RESUMO DE EXECUCAO ----------------",
+        f"• Cortes / Religacoes (CR): {cr}",
+        f"• Reavisos em Maos (RV-M):  {rv_m}",
+        f"• Reavisos Outros (RV-O):   {rv_o}",
+        f"• Total Reavisos (RV):      {rv_tot}",
+        f"• Improdutivos (IMP):       {imp}",
+        f"• Negociacoes (NG):          {ng}",
+        "---------------- METAS E VALORES ----------------",
+        f"⭐ Pontuacao Total:       {pontos:.2f} pts",
+        f"🏆 Faixa Atingida:        {faixa_str}",
+        f"💰 Bonificacao Estimada:  R$ {bonif_str}",
+        f"🗓️ Mes de Pagamento:      {mes_pagamento.upper()}"
+    ]
+
+    y = 130
+    for line in lines_summary:
+        draw.text((40, y), line, fill=(226, 232, 240), font=font_main)
+        y += 18
+
+    # Tabela Diária
+    draw.rectangle([(20, 380), (700, 750)], fill=(30, 41, 59), outline=(100, 116, 139), width=1)
+    draw.text((40, 395), "---------------- TABELA DIARIA DE SERVICOS ----------------", fill=(255, 255, 255), font=font_main)
+    draw.text((40, 425), "Data       | CR  | RV  | IMP | NG ", fill=(59, 130, 246), font=font_main)
+    draw.text((40, 440), "--------------------------------------------------", fill=(100, 116, 139), font=font_main)
+
+    hoje = agora_sp()
+    segunda = hoje - timedelta(days=hoje.weekday())
+    dias_ordem = ['SEG', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SAB']
+
+    y = 460
+    for idx, dia_chave in enumerate(dias_ordem):
+        dt = (segunda + timedelta(days=idx)).strftime("%d/%m/%Y")
+        d_dados = dias.get(dia_chave, {})
+
+        d_cr = d_dados.get('corte', 0) + d_dados.get('religacao', 0)
+        d_rv = d_dados.get('reaviso_maos', 0) + d_dados.get('reaviso_outros', 0)
+        d_imp = d_dados.get('improdutivo', 0)
+        d_ng = d_dados.get('negociacao', 0)
+
+        row_str = f"{dt} | {d_cr:3d} | {d_rv:3d} | {d_imp:3d} | {d_ng:3d}"
+        draw.text((40, y), row_str, fill=(226, 232, 240), font=font_main)
+        y += 22
+
+    draw.text((40, 765), "* Comprovante gerado para conferencia e acompanhamento com o encarregado.", fill=(148, 163, 184), font=font_main)
+
+    buffer = io.BytesIO()
+    image.save(buffer, format='PNG')
+    buffer.seek(0)
+    return buffer
+
+# --- TECLADOS INTERATIVOS ---
 def menu_principal_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=False, is_persistent=True, row_width=2)
     
-    # Linha 1: Religue +1 no lugar do Relatório Semanal | Reaviso em Mãos no lugar do Histórico Mensal
     btn_religue = types.KeyboardButton('🔌 Religue +1')
     btn_maos = types.KeyboardButton('✋ Reaviso em Mãos')
     
-    # Linha 2: Improdutivo +1 no lugar de Registrar Produção | Comandos & Termos
     btn_improdutivo = types.KeyboardButton('🚫 Improdutivo +1')
     btn_comandos = types.KeyboardButton('📜 Comandos & Termos')
     
-    # Linha 3: Relatório Semanal e Histórico Mensal reposicionados
     btn_relatorio = types.KeyboardButton('📊 Relatório Semanal')
     btn_mensal = types.KeyboardButton('📅 Histórico Mensal')
     
-    # Linha 4: Registrar Produção (painel completo) e Resetar Semana
     btn_registrar = types.KeyboardButton('⚡ Registrar Produção')
     btn_reset_semana = types.KeyboardButton('🔄 Resetar Semana')
     
@@ -369,7 +497,7 @@ def teclado_registro_rapido():
     markup = types.InlineKeyboardMarkup(row_width=3)
     markup.add(
         types.InlineKeyboardButton("🔌 Religue +1", callback_data="add_religacao_1"),
-        types.InlineKeyboardButton("✋ Reaviso em Mãos +1", callback_data="convert_maos_1"),
+        types.InlineKeyboardButton("✋ Reaviso Mãos +1", callback_data="convert_maos_1"),
         types.InlineKeyboardButton("🚫 Improdutivo +1", callback_data="add_improdutivo_1")
     )
     markup.add(
@@ -384,12 +512,12 @@ def teclado_registro_rapido():
 def teclado_confirmacao_reset_semana():
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("⚠️ SIM, ZERAR SEMANA", callback_data="confirm_reset_semana"),
+        types.InlineKeyboardButton("⚠️ SIM, ZERAR E GERAR FOTO", callback_data="confirm_reset_semana"),
         types.InlineKeyboardButton("❌ CANCELAR", callback_data="cancel_reset_semana")
     )
     return markup
 
-# --- FUNÇÕES DE CAPTURA CONTINUA (NEXT STEP) ---
+# --- CAPTURA CONTINUA (NEXT STEP) ---
 def receber_qnt_corte(message):
     try:
         qnt = int(message.text)
@@ -416,7 +544,7 @@ def receber_qnt_reaviso_outros(message):
     except:
         bot.reply_to(message, "⚠️ Valor inválido. Digite apenas números inteiros.", parse_mode="Markdown")
 
-# --- HANDLERS DAS AÇÕES RÁPIDAS DO MENU PRINCIPAL ---
+# --- HANDLERS DAS AÇÕES RÁPIDAS ---
 @bot.message_handler(func=lambda m: m.text == '🔌 Religue +1')
 def acao_religue_rapido(message):
     if not esta_autorizado(message.from_user.id):
@@ -426,7 +554,7 @@ def acao_religue_rapido(message):
     inicializar_agente(str_id, message.from_user.first_name)
     processar_lancamento(str_id, 'religacao', 1)
     frase = random.choice(FRASES_MOTIVACIONAIS)
-    bot.reply_to(message, f"🔌 *+1 Religação* registrada com sucesso!\n\n💬 _{frase}_", parse_mode="Markdown")
+    bot.reply_to(message, f"🔌 *+1 RELIGAÇÃO REGISTRADA!*\n\n💬 _{frase}_", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == '✋ Reaviso em Mãos')
 def acao_maos_rapido(message):
@@ -437,7 +565,7 @@ def acao_maos_rapido(message):
     inicializar_agente(str_id, message.from_user.first_name)
     converter_reaviso_para_maos(str_id, 1)
     frase = random.choice(FRASES_MOTIVACIONAIS)
-    bot.reply_to(message, f"✋ *+1 Reaviso em Mãos* registrado com sucesso!\n\n💬 _{frase}_", parse_mode="Markdown")
+    bot.reply_to(message, f"✋ *+1 REAVISO EM MÃOS REGISTRADO!*\n\n💬 _{frase}_", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: m.text == '🚫 Improdutivo +1')
 def acao_improdutivo_rapido(message):
@@ -447,9 +575,10 @@ def acao_improdutivo_rapido(message):
     str_id = str(message.from_user.id)
     inicializar_agente(str_id, message.from_user.first_name)
     processar_lancamento(str_id, 'improdutivo', 1)
-    bot.reply_to(message, "🚫 *+1 Improdutivo* registrado com sucesso!", parse_mode="Markdown")
+    frase_imp = random.choice(FRASES_IMPRODUTIVO)
+    bot.reply_to(message, f"🚫 *+1 IMPRODUTIVO COMPUTADO!*\n\n💬 _{frase_imp}_", parse_mode="Markdown")
 
-# --- HANDLERS DE COMANDOS E OUTROS MENUS ---
+# --- START & REGULAMENTO ---
 @bot.message_handler(commands=['start'])
 def start(message):
     str_id = str(message.from_user.id)
@@ -499,20 +628,25 @@ def listar_comandos(message):
         return bot.reply_to(message, "⛔ *Acesso não autorizado.* Digite /start para solicitar liberação.", parse_mode="Markdown")
 
     texto = (
-        "📜 *LISTA DE COMANDOS DISPONÍVEIS*\n\n"
-        "📊 *Relatórios e Histórico:*\n"
-        "• `/relatorio` ou `/prod` - Exibe o resumo da semana atual\n"
-        "• `/mensal` ou `/historico` - Consulta o histórico mês a mês e valores acumulados\n"
-        "• `/resetar` - Zera a contagem da semana mantendo o histórico salvo\n"
-        "• `/zerar_mensal` - Zera permanentemente todo o histórico\n\n"
-        "⚡ *Lançamentos Rápidos por Texto:*\n"
-        "• `/corte [qnt]` - Registra cortes (Ex: `/corte 10`)\n"
-        "• `/rel [qnt]` - Registra religações (Ex: `/rel 5`)\n"
-        "• `/rea [qnt]` - Registra carga de reavisos (Ex: `/rea 30`)\n"
-        "• `/imp [qnt]` - Registra improdutivos (Ex: `/imp 2`)\n"
-        "• `/maos [qnt]` - Transfere reavisos para 'em mãos' (Ex: `/maos 2`)\n\n"
-        "⚙️ *Ajustes de Dia Específico:*\n"
-        "• `/addcorte [dia] [qnt]` - Lança cortes em dia específico (Ex: `/addcorte seg 10`)\n\n"
+        "📜 *REGULAMENTO INTERNO DE USO (USO RESTRITO & PESSOAL)*\n\n"
+        "📌 *Propósito do Aplicativo:*\n"
+        "• Sistema independente idealizado e programado por um **funcionário da operação**.\n"
+        "• **Uso exclusivo e privado** restrito apenas a 4 funcionários autorizados para acompanhamento de metas.\n"
+        "• Não possui integração com o sistema da concessionária. Todo dado é registrado pelo próprio operador para fins de auditoria pessoal.\n\n"
+        "----------------------------------------\n"
+        "📊 *RELATÓRIOS E CONSULTAS:*\n"
+        "• `/relatorio` ou `/prod` - Resumo semanal com pontuação e tabela `IMP`\n"
+        "• `/mensal` ou `/historico` - Histórico em tabelas mês a mês\n"
+        "• `/resetar` - Zera a semana e **gera imagem em foto para o encarregado**\n"
+        "• `/zerar_mensal` - Apaga todo o histórico permanentemente\n\n"
+        "⚡ *LANÇAMENTOS RÁPIDOS POR TEXTO:*\n"
+        "• `/corte [qnt]` - Lança cortes (Ex: `/corte 10`)\n"
+        "• `/rel [qnt]` - Lança religações (Ex: `/rel 5`)\n"
+        "• `/rea [qnt]` - Lança reavisos (Ex: `/rea 30`)\n"
+        "• `/imp [qnt]` - Lança improdutivos (Ex: `/imp 2`)\n"
+        "• `/maos [qnt]` - Converte reavisos para em mãos (Ex: `/maos 2`)\n\n"
+        "⚙️ *AJUSTE DE DIA ESPECÍFICO:*\n"
+        "• `/addcorte [dia] [qnt]` - Ex: `/addcorte seg 10`\n\n"
         f"----------------------------------------\n"
         f"{AVISO_INDEPENDENTE}"
     )
@@ -593,7 +727,13 @@ def registrar_servico_manual(message):
         quantidade = int(message.text.split()[1])
         processar_lancamento(str_id, tipo_id, quantidade)
         
-        frase_extra = f"\n\n💬 _{random.choice(FRASES_MOTIVACIONAIS)}_" if tipo_id in ['corte', 'religacao'] else ""
+        if tipo_id in ['corte', 'religacao']:
+            frase_extra = f"\n\n💬 _{random.choice(FRASES_MOTIVACIONAIS)}_"
+        elif tipo_id == 'improdutivo':
+            frase_extra = f"\n\n💬 _{random.choice(FRASES_IMPRODUTIVO)}_"
+        else:
+            frase_extra = ""
+
         bot.reply_to(message, f"✅ *+{quantidade} {tipo_nome}(s)* registrado(s)!{frase_extra}", parse_mode="Markdown")
     except:
         bot.reply_to(message, f"⚠️ Sintaxe: `{comando} 10`", parse_mode="Markdown")
@@ -613,10 +753,10 @@ def relatorio_mensal(message):
     if not dados_meses:
         return bot.reply_to(message, "📂 *Nenhum histórico mensal registrado no momento.*", parse_mode="Markdown")
     
-    texto = f"📅 *HISTÓRICO MENSAL DE PRODUÇÃO SALVO*\n👤 Agente: *{nome.upper()}*\n\n"
+    texto = f"📅 *HISTÓRICO MENSAL DE PRODUÇÃO - CONSOLIDAÇÃO EM TABELAS*\n👤 Agente: *{nome.upper()}*\n\n"
     
     for row in dados_meses:
-        mes_ano_str, cr, rv, imp, neg = row
+        mes_ano_str, cortes, religacoes, rv_maos, rv_outros, imp, neg = row
         ano, mes = mes_ano_str.split('-')
         nome_mes = MESES_NOME.get(int(mes), mes)
         
@@ -627,16 +767,19 @@ def relatorio_mensal(message):
             ano_pag += 1
         nome_mes_pag = MESES_NOME.get(mes_pag_num, str(mes_pag_num))
         
-        pts_mes = (cr * PESO_SERVICO) + (rv * PESO_REAVISO)
+        cr_total = cortes + religacoes
+        rv_total = rv_maos + rv_outros
+        pontos = (cr_total * PESO_SERVICO) + (rv_total * PESO_REAVISO)
+        
         m_f1_pts, m_f2_pts, m_f3_pts = 250 * PESO_SERVICO, 300 * PESO_SERVICO, 350 * PESO_SERVICO
         
-        if pts_mes >= m_f3_pts:
+        if pontos >= m_f3_pts:
             valor_bonif = 300.00
             faixa_nome = "Faixa 3"
-        elif pts_mes >= m_f2_pts:
+        elif pontos >= m_f2_pts:
             valor_bonif = 200.00
             faixa_nome = "Faixa 2"
-        elif pts_mes >= m_f1_pts:
+        elif pontos >= m_f1_pts:
             valor_bonif = 150.00
             faixa_nome = "Faixa 1"
         else:
@@ -646,14 +789,24 @@ def relatorio_mensal(message):
         bonif_str = f"{valor_bonif:,.2f}".replace('.', ',')
         
         texto += (
-            f"🗓️ *{nome_mes} / {ano}*\n"
-            f"• Cortes / Religações: *{cr}*\n"
-            f"• Reavisos Atendidos: *{rv}*\n"
-            f"• Improdutivos: *{imp}*\n"
-            f"• Faixa Atingida: *{faixa_nome}*\n"
-            f"💰 *Valor parcial estimado:* *R$ {bonif_str}*\n"
-            f"🗓️ *Pagamento Previsto:* *{nome_mes_pag} / {ano_pag}*\n"
-            f"----------------------------------------\n"
+            f"🗓️ *MÊS/ANO: {nome_mes} / {ano}*\n"
+            f"```\n"
+            f"+------------------------------------+-------+\n"
+            f"| ITEM OPERACIONAL                   | QTD   |\n"
+            f"+------------------------------------+-------+\n"
+            f"| ✂️  Cortes Executados              | {cortes:5d} |\n"
+            f"| 🔌 Religações Executadas           | {religacoes:5d} |\n"
+            f"| ✋ Reavisos em Mãos                | {rv_maos:5d} |\n"
+            f"| 📬 Reavisos Outros                 | {rv_outros:5d} |\n"
+            f"| 🚫 Improdutivos (IMP)              | {imp:5d} |\n"
+            f"| 🤝 Negociações                     | {neg:5d} |\n"
+            f"+------------------------------------+-------+\n"
+            f"| ⭐ PONTUAÇÃO TOTAL                 |{pontos:7.2f}|\n"
+            f"| 🏆 FAIXA ATINGIDA                  | {faixa_nome:5s} |\n"
+            f"| 💰 VALOR ESTIMADO                  |R${bonif_str:>6s}|\n"
+            f"| 🗓️ MÊS DE PAGAMENTO                | {nome_mes_pag:5s} |\n"
+            f"+------------------------------------+-------+\n"
+            f"```\n"
         )
     
     bot.send_message(message.chat.id, texto, parse_mode="Markdown")
@@ -687,7 +840,7 @@ def relatorio(message):
     rv_outros = totais.get('reaviso_outros', 0)
     rv_total = rv_maos + rv_outros
     
-    en = totais.get('improdutivo', 0)
+    imp = totais.get('improdutivo', 0)
     ng = totais.get('negociacao', 0)
     
     if rv_total > 0:
@@ -704,11 +857,11 @@ def relatorio(message):
     
     if pontos >= (m_f3 * PESO_SERVICO):
         faixa_str = "Faixa 3"
-        falta_str = "Meta máxima atingida!"
+        falta_str = "Meta máxima atingida! 🎉"
         bonificacao = 300.00
     elif pontos >= m_f2_pts:
         faixa_str = "Faixa 2"
-        falta_str = "Atingiu a Faixa 2"
+        falta_str = "Atingiu a Faixa 2 💪"
         bonificacao = 200.00
     elif pontos >= m_f1_pts:
         faixa_str = "Faixa 1"
@@ -726,18 +879,22 @@ def relatorio(message):
         bonificacao = 0.00
 
     bonif_str = f"{bonificacao:,.2f}".replace('.', ',')
+
     msg_bonif = (
-        f"👋 Olá {nome.upper()}, segue o resumo da sua produção na semana:\n\n"
-        f"📅 Semana ({data_inicio} a {data_fim}):\n"
-        f"• Cortes/Religações: {cr}\n"
-        f"• Reavisos: {detalhe_reaviso}\n"
-        f"• Entregas / Improdutivos: {en}\n"
-        f"• Negociações: {ng}\n"
-        f"• Faixa: {faixa_str}\n"
-        f"• {falta_str}\n"
-        f"💰 Bonificação estimada: R$ {bonif_str}\n\n"
-        f"🗓️ *MÊS DE PAGAMENTO DESTA PRODUÇÃO:*\n"
-        f"➡️ *{nome_mes_pagamento}*"
+        f"👋 Olá *{nome.upper()}*, segue o resumo da sua produção na semana:\n\n"
+        f"📅 *Período:* `{data_inicio}` a `{data_fim}`\n"
+        f"• Cortes/Religações (CR): *{cr}*\n"
+        f"• Reavisos Atendidos (RV): *{detalhe_reaviso}*\n"
+        f"• Improdutivos (IMP): *{imp}*\n"
+        f"• Negociações (NG): *{ng}*\n\n"
+        f"⭐ *PONTUAÇÃO TOTAL:* *{pontos:.2f} pts*\n"
+        f"🏆 *Faixa Atingida:* *{faixa_str}*\n"
+        f"📊 *Situação:* _{falta_str}_\n"
+        f"💰 *Bonificação Estimada:* *R$ {bonif_str}*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🚨 💳 *MÊS DE PAGAMENTO DESTA PRODUÇÃO* 💳 🚨\n"
+        f"🔥 ➔ ➔ ➔  【 *{nome_mes_pagamento.upper()}* 】  ⬅️ ⬅️ ⬅️ 🔥\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     
     bot.send_message(message.chat.id, msg_bonif, parse_mode="Markdown")
@@ -751,18 +908,18 @@ def relatorio(message):
         
         d_cr = d_dados.get('corte', 0) + d_dados.get('religacao', 0)
         d_rv = d_dados.get('reaviso_maos', 0) + d_dados.get('reaviso_outros', 0)
-        d_en = d_dados.get('improdutivo', 0)
+        d_imp = d_dados.get('improdutivo', 0)
         d_ng = d_dados.get('negociacao', 0)
         
-        linhas_tabela.append(f"{dt} | {d_cr:2d} | {d_rv:2d} | {d_en:2d} | {d_ng:2d}")
+        linhas_tabela.append(f"{dt} | {d_cr:2d} | {d_rv:2d} | {d_imp:3d} | {d_ng:2d}")
 
     tabela_formatada = "\n".join(linhas_tabela)
 
     msg_diario = (
         "📅 *Serviços executados por dia:*\n\n"
         "```\n"
-        "Data       | CR | RV | EN | NG\n"
-        "--------------------------------\n"
+        "Data       | CR | RV | IMP | NG\n"
+        "---------------------------------\n"
         f"{tabela_formatada}\n"
         "```"
     )
@@ -780,7 +937,8 @@ def solicitar_reset_semana(message):
     bot.reply_to(
         message, 
         "⚠️ *CONFIRMAÇÃO DE RESET SEMANAL*\n\n"
-        "Deseja zerar a contagem ativa da semana atual? (Os dados continuarão salvos no histórico mensal).", 
+        "Deseja zerar a contagem ativa da semana atual?\n"
+        "📸 *Uma foto comprovante será gerada automaticamente para enviar ao encarregado.*", 
         parse_mode="Markdown", 
         reply_markup=teclado_confirmacao_reset_semana()
     )
@@ -868,22 +1026,58 @@ def callback_handler(call):
     elif call.data == 'convert_maos_1':
         converter_reaviso_para_maos(user_id, 1)
         frase = random.choice(FRASES_MOTIVACIONAIS)
-        bot.answer_callback_query(call.id, f"✋ +1 REAVISO EM MÃOS!\n\n{frase}", show_alert=True)
+        bot.answer_callback_query(call.id, f"✋ +1 REAVISO EM MÃOS REGISTRADO!\n\n{frase}", show_alert=True)
 
     elif call.data == 'add_improdutivo_1':
         processar_lancamento(user_id, 'improdutivo', 1)
-        bot.answer_callback_query(call.id, "🚫 +1 IMPRODUTIVO REGISTRADO!", show_alert=True)
+        frase_imp = random.choice(FRASES_IMPRODUTIVO)
+        bot.answer_callback_query(call.id, f"🚫 +1 IMPRODUTIVO COMPUTADO!\n\n{frase_imp}", show_alert=True)
 
     elif call.data == 'confirm_reset_semana':
+        totais, dias = obter_resumo_semana(user_id)
+        
+        hoje = agora_sp()
+        segunda = hoje - timedelta(days=hoje.weekday())
+        sabado = segunda + timedelta(days=5)
+        data_inicio = segunda.strftime("%d/%m")
+        data_fim = sabado.strftime("%d/%m")
+        
+        mes_pagamento_num = hoje.month + 2
+        if mes_pagamento_num > 12: mes_pagamento_num -= 12
+        nome_mes_pagamento = MESES_NOME[mes_pagamento_num]
+
+        cr = totais.get('corte', 0) + totais.get('religacao', 0)
+        rv_total = totais.get('reaviso_maos', 0) + totais.get('reaviso_outros', 0)
+        pontos = (cr * PESO_SERVICO) + (rv_total * PESO_REAVISO)
+
+        if pontos >= (350 * PESO_SERVICO): faixa_str, bonificacao = "Faixa 3", 300.00
+        elif pontos >= (300 * PESO_SERVICO): faixa_str, bonificacao = "Faixa 2", 200.00
+        elif pontos >= (250 * PESO_SERVICO): faixa_str, bonificacao = "Faixa 1", 150.00
+        else: faixa_str, bonificacao = "Sem Faixa", 0.00
+        
+        bonif_str = f"{bonificacao:,.2f}".replace('.', ',')
+
+        # Gera foto para o encarregado
+        foto_stream = criar_imagem_relatorio_semanal(
+            call.from_user.first_name, data_inicio, data_fim,
+            totais, dias, faixa_str, bonif_str, pontos, nome_mes_pagamento
+        )
+
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("UPDATE lancamentos SET semana_ativa = FALSE WHERE user_id = %s AND semana_ativa = TRUE;", (user_id,))
         conn.commit()
         cur.close()
         conn.close()
-        
-        bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO! DADOS GUARDADOS NO MENSAL.*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Semana zerada com sucesso!", show_alert=True)
+
+        bot.edit_message_text("🔄 *CICLO SEMANAL ZERADO COM SUCESSO!*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.send_photo(
+            call.message.chat.id, 
+            photo=foto_stream, 
+            caption="📸 *COMPROVANTE DE PRODUÇÃO SEMANAL GERADO!*\n\n_Envie esta imagem para seu encarregado para conferência de valores e metas._",
+            parse_mode="Markdown"
+        )
+        bot.answer_callback_query(call.id, "Semana zerada e comprovante em imagem gerado!", show_alert=True)
 
     elif call.data == 'cancel_reset_semana':
         bot.edit_message_text("❌ *OPERAÇÃO CANCELADA.*", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
